@@ -4,6 +4,6 @@
 import { cn } from "@/lib/utils";
 
 export const TRAIN_PICKER_TRIGGER_CLASS = cn(
-  "hub-menu-trigger field-soft inline-flex h-9 items-center gap-1.5 rounded-[12px] px-3 text-[12.5px] text-muted-foreground transition-colors",
+  "hub-menu-trigger field-soft inline-flex h-9 cursor-pointer select-none items-center gap-1.5 rounded-[12px] px-3 text-[12.5px] text-muted-foreground transition-colors",
   "focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
 );

@@ -745,7 +745,7 @@ function DeviceList({
           >
             <Tooltip>
               <TooltipTrigger asChild={true}>
-                <span className="block min-w-0 flex-1 cursor-text select-text truncate">
+                <span className="block min-w-0 flex-1 truncate">
                   {m.title || m.id}
                 </span>
               </TooltipTrigger>
@@ -846,7 +846,7 @@ function HubList({
                 <TooltipTrigger asChild={true}>
                   <span
                     className={cn(
-                      "block min-w-0 flex-1 cursor-text select-text truncate",
+                      "block min-w-0 flex-1 truncate",
                       exceeds && "text-muted-foreground",
                     )}
                   >

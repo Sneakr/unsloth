@@ -33,7 +33,7 @@ import { datasetDisplayName } from "../lib/display";
 const DATASET_PICKER_TAB_STORAGE_KEY = "unsloth.studio.train.datasetPickerTab";
 
 const TRIGGER_BASE = cn(
-  "hub-menu-trigger field-soft inline-flex h-9 w-full items-center gap-1.5 rounded-[12px] px-3 text-[12.5px] text-muted-foreground transition-colors",
+  "hub-menu-trigger field-soft inline-flex h-9 w-full cursor-pointer select-none items-center gap-1.5 rounded-[12px] px-3 text-[12.5px] text-muted-foreground transition-colors",
   "focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
 );
 
@@ -377,7 +377,7 @@ function DeviceList({
         return (
           <li key={item.key}>
             <SelectablePickerItem active={active} onSelect={() => onPick(item)}>
-              <span className="block min-w-0 flex-1 cursor-text select-text truncate">
+              <span className="block min-w-0 flex-1 truncate">
                 {item.title}
               </span>
               <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
@@ -456,7 +456,7 @@ function HubList({
         return (
           <li key={d.id}>
             <SelectablePickerItem active={active} onSelect={() => onPick(d.id)}>
-              <span className="block min-w-0 flex-1 cursor-text select-text truncate">
+              <span className="block min-w-0 flex-1 truncate">
                 {d.id}
               </span>
             </SelectablePickerItem>
