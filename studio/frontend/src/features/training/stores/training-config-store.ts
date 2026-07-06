@@ -3,6 +3,7 @@
 
 import { CPT_TARGET_MODULES, DEFAULT_HYPERPARAMS, LR_DEFAULT_CPT, LR_DEFAULT_FULL, LR_DEFAULT_LORA, STEPS, TARGET_MODULES } from "@/config/training";
 import { authFetch } from "@/features/auth";
+import { getHfToken, useHfTokenStore } from "@/features/hub";
 import { isAdapterMethod } from "@/types/training";
 import type { DatasetFormat } from "@/types/training";
 import type { ModelType, StepNumber, TrainingMethod } from "@/types/training";
@@ -11,11 +12,17 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { checkDatasetFormat } from "../api/datasets-api";
 import { checkVisionModel, getModelConfig } from "../api/models-api";
+import { cacheReferenceMatchesSelection } from "../lib/cache-reference";
+import { isMissingLocalDatasetCacheError } from "../lib/local-cache-errors";
 import { mapBackendModelConfigToTrainingPatch } from "../lib/model-defaults";
 import { isRawTextDatasetFormat } from "../lib/training-methods";
 import { validateS3Source } from "../lib/validation";
 import type { BackendModelConfig } from "../api/models-api";
-import type { TrainingConfigState, TrainingConfigStore } from "../types/config";
+import type {
+  ModelCacheReferenceOptions,
+  TrainingConfigState,
+  TrainingConfigStore,
+} from "../types/config";
 
 const MIN_STEP: StepNumber = 1;
 const MAX_STEP: StepNumber = STEPS.length as StepNumber;
@@ -58,12 +65,16 @@ const initialState: TrainingConfigState = {
   currentStep: MIN_STEP,
   modelType: null,
   selectedModel: null,
+  modelKnownCached: false,
+  modelLocalPath: null,
+  modelFormat: null,
   projectName: "",
   trainingMethod: "qlora",
-  hfToken: "",
   datasetSource: "huggingface",
   datasetFormat: "auto",
   dataset: null,
+  datasetKnownCached: false,
+  datasetLocalPath: null,
   datasetSubset: null,
   datasetSplit: null,
   datasetEvalSplit: null,
@@ -88,6 +99,7 @@ const initialState: TrainingConfigState = {
   isCheckingDataset: false,
   isDatasetImage: null,
   isDatasetAudio: false,
+  datasetCheckFailed: false,
   maxPositionEmbeddings: null,
   ...DEFAULT_HYPERPARAMS,
 };
@@ -126,6 +138,7 @@ const NON_PERSISTED_STATE_KEYS: ReadonlySet<keyof TrainingConfigState> = new Set
   "isCheckingDataset",
   "isDatasetImage",
   "isDatasetAudio",
+  "datasetCheckFailed",
   "trainOnCompletions",
   "maxPositionEmbeddings",
   "isVisionModel",
@@ -361,7 +374,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           modelDefaultsError: null,
         });
 
-        void getModelConfig(modelName, controller.signal, get().hfToken || undefined)
+        void getModelConfig(modelName, controller.signal, getHfToken() || undefined)
           .then((modelDetails) => {
             if (controller.signal.aborted) return;
             if (get().selectedModel !== modelName) return;
@@ -457,7 +470,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             });
 
             // Fallback vision check; pass the token so a gated/private VLM classifies right.
-            void checkVisionModel(modelName, get().hfToken || undefined)
+            void checkVisionModel(modelName, getHfToken() || undefined)
               .then((isVision) => {
                 if (get().selectedModel !== modelName) return;
                 set({
@@ -475,19 +488,29 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           });
       };
 
-      const runDatasetCheck = (datasetName: string, split: string) => {
+      const runDatasetCheck = (
+        datasetName: string,
+        split: string,
+        options?: { preferLocalCache?: boolean },
+      ) => {
         _datasetCheckController?.abort();
         const controller = new AbortController();
         _datasetCheckController = controller;
         set({ isCheckingDataset: true });
 
         const state = get();
+        const isHfSelection =
+          state.datasetSource === "huggingface" && state.dataset === datasetName;
+        const preferLocalCache =
+          options?.preferLocalCache ?? (isHfSelection && state.datasetKnownCached);
         checkDatasetFormat({
           datasetName,
-          hfToken: state.hfToken.trim() || null,
+          hfToken: getHfToken() || null,
           subset: state.datasetSubset,
           split,
           isVlm: state.isVisionModel,
+          preferLocalCache,
+          localPath: isHfSelection ? state.datasetLocalPath : null,
         })
           .then((res) => {
             if (controller.signal.aborted) return;
@@ -497,6 +520,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
               isDatasetImage: isImage,
               isDatasetAudio: isAudio,
               isCheckingDataset: false,
+              datasetCheckFailed: false,
             };
             if (!_trainOnCompletionsManuallySet) {
               const { isVisionModel, isAudioModel } = get();
@@ -514,9 +538,24 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             }
             set(updates);
           })
-          .catch(() => {
+          .catch((error) => {
             if (controller.signal.aborted) return;
-            set({ isDatasetImage: null, isCheckingDataset: false });
+            if (preferLocalCache && isMissingLocalDatasetCacheError(error)) {
+              const current = get();
+              if (
+                current.datasetSource === "huggingface" &&
+                current.dataset === datasetName
+              ) {
+                set({ datasetKnownCached: false, datasetLocalPath: null });
+                runDatasetCheck(datasetName, split, { preferLocalCache: false });
+                return;
+              }
+            }
+            set({
+              isDatasetImage: null,
+              isCheckingDataset: false,
+              datasetCheckFailed: true,
+            });
           });
       };
 
@@ -536,7 +575,70 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
         isDatasetImage: null,
         isDatasetAudio: false,
         isCheckingDataset: false,
+        datasetCheckFailed: false,
       });
+
+      const selectModelInternal = (
+        selectedModel: string | null,
+        modelType: ModelType | null,
+        options?: ModelCacheReferenceOptions,
+      ) => {
+        const previousModel = get().selectedModel;
+        // Reset vision_image_size on a true switch only; same-model reloads
+        // go through the mapper, which preserves the user's choice.
+        const patch: {
+          selectedModel: string | null;
+          modelDefaultsError: null;
+          modelKnownCached: boolean;
+          modelLocalPath: string | null;
+          modelFormat: TrainingConfigState["modelFormat"];
+          modelType?: ModelType;
+          visionImageSize?: number | null;
+          trustRemoteCode?: boolean;
+          approvedRemoteCodeFingerprint?: string | null;
+        } = {
+          selectedModel,
+          modelDefaultsError: null,
+          modelKnownCached: selectedModel ? (options?.knownCached ?? false) : false,
+          modelLocalPath: selectedModel ? (options?.localPath ?? null) : null,
+          modelFormat: selectedModel ? (options?.modelFormat ?? null) : null,
+        };
+        if (modelType) {
+          patch.modelType = modelType;
+        }
+        if (selectedModel !== previousModel) {
+          patch.visionImageSize = DEFAULT_HYPERPARAMS.visionImageSize;
+          // Clear the prior model's approval so a clean model is not trained with a
+          // stale trust_remote_code=true (disables fused CE). Its own YAML default is
+          // re-applied below, and a custom-code model re-opens the dialog before start.
+          patch.trustRemoteCode = false;
+          patch.approvedRemoteCodeFingerprint = null;
+        }
+        set(patch);
+
+        if (!selectedModel) {
+          _modelConfigController?.abort();
+          _modelConfigController = null;
+          set({
+            isCheckingVision: false,
+            isVisionModel: false,
+            isEmbeddingModel: false,
+            isAudioModel: false,
+            isDatasetAudio: false,
+            isLoadingModelDefaults: false,
+            modelDefaultsError: null,
+            modelDefaultsAppliedFor: null,
+          });
+          return;
+        }
+
+        const shouldLoadDefaults =
+          selectedModel !== previousModel ||
+          get().modelDefaultsAppliedFor !== selectedModel;
+        if (shouldLoadDefaults) {
+          void loadAndApplyModelDefaults(selectedModel);
+        }
+      };
 
       return {
         ...initialState,
@@ -561,51 +663,52 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           });
         },
         setSelectedModel: (selectedModel) => {
-          const previousModel = get().selectedModel;
-          // Reset vision_image_size on a true switch only; same-model reloads
-          // go through the mapper, which preserves the user's choice.
-          const patch: {
-            selectedModel: string | null;
-            modelDefaultsError: null;
-            visionImageSize?: number | null;
-            trustRemoteCode?: boolean;
-            approvedRemoteCodeFingerprint?: string | null;
-          } = {
-            selectedModel,
-            modelDefaultsError: null,
-          };
-          if (selectedModel !== previousModel) {
-            patch.visionImageSize = DEFAULT_HYPERPARAMS.visionImageSize;
-            // Clear the prior model's approval so a clean model is not trained with a
-            // stale trust_remote_code=true (disables fused CE). Its own YAML default is
-            // re-applied below, and a custom-code model re-opens the dialog before start.
-            patch.trustRemoteCode = false;
-            patch.approvedRemoteCodeFingerprint = null;
-          }
-          set(patch);
-
-          if (!selectedModel) {
-            _modelConfigController?.abort();
-            _modelConfigController = null;
-            set({
-              isCheckingVision: false,
-              isVisionModel: false,
-              isEmbeddingModel: false,
-              isAudioModel: false,
-              isDatasetAudio: false,
-              isLoadingModelDefaults: false,
-              modelDefaultsError: null,
-              modelDefaultsAppliedFor: null,
-            });
+          selectModelInternal(selectedModel, null);
+        },
+        selectTrainingModel: (selectedModel, modelType, options) => {
+          selectModelInternal(selectedModel, modelType, options);
+        },
+        setSelectedModelCacheReference: (model, options) => {
+          if (get().selectedModel !== model) return;
+          set({
+            modelKnownCached: true,
+            modelLocalPath: options.localPath,
+            modelFormat: options.modelFormat,
+          });
+        },
+        clearSelectedModelCacheReference: (model, localPath) => {
+          const state = get();
+          if (
+            !cacheReferenceMatchesSelection({
+              currentId: state.selectedModel,
+              expectedId: model,
+              knownCached: state.modelKnownCached,
+              currentLocalPath: state.modelLocalPath,
+              expectedLocalPath: localPath,
+            })
+          ) {
             return;
           }
-
-          const shouldLoadDefaults =
-            selectedModel !== previousModel ||
-            get().modelDefaultsAppliedFor !== selectedModel;
-          if (shouldLoadDefaults) {
-            void loadAndApplyModelDefaults(selectedModel);
+          set({ modelKnownCached: false, modelLocalPath: null, modelFormat: null });
+        },
+        clearSelectedDatasetCacheReference: (dataset, localPath) => {
+          const state = get();
+          if (state.datasetSource !== "huggingface") return;
+          if (
+            !cacheReferenceMatchesSelection({
+              currentId: state.dataset,
+              expectedId: dataset,
+              knownCached: state.datasetKnownCached,
+              currentLocalPath: state.datasetLocalPath,
+              expectedLocalPath: localPath,
+            })
+          ) {
+            return;
           }
+          set({ datasetKnownCached: false, datasetLocalPath: null });
+          runDatasetCheck(dataset, get().datasetSplit || "train", {
+            preferLocalCache: false,
+          });
         },
         ensureModelDefaultsLoaded: () => {
           const state = get();
@@ -625,10 +728,8 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             ),
           );
         },
-        setHfToken: (hfToken) =>
-          set({ hfToken: hfToken.trim().replace(/^["']+|["']+$/g, "") }),
         setDatasetSource: (datasetSource) => set({ datasetSource }),
-        selectHfDataset: (dataset) => {
+        selectHfDataset: (dataset, options) => {
           _datasetCheckController?.abort();
           _datasetCheckController = null;
           _trainOnCompletionsManuallySet = false;
@@ -637,6 +738,8 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             dataset,
             uploadedFile: null,
             ...resetDatasetState(),
+            datasetKnownCached: dataset ? (options?.knownCached ?? false) : false,
+            datasetLocalPath: dataset ? (options?.localPath ?? null) : null,
           });
         },
         selectLocalDataset: (uploadedFile) => {
@@ -648,6 +751,8 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             dataset: null,
             uploadedFile,
             ...resetDatasetState(),
+            datasetKnownCached: false,
+            datasetLocalPath: null,
           });
           if (uploadedFile) {
             runDatasetCheck(uploadedFile, "train");
@@ -662,6 +767,8 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             dataset: null,
             uploadedFile: null,
             ...resetDatasetState(),
+            datasetKnownCached: false,
+            datasetLocalPath: null,
           });
         },
         setDatasetFormat: (datasetFormat) =>
@@ -690,6 +797,8 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           _trainOnCompletionsManuallySet = false;
           set({
             dataset,
+            datasetKnownCached: false,
+            datasetLocalPath: null,
             datasetSubset: null,
             datasetSplit: null,
             datasetEvalSplit: null,
@@ -699,6 +808,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             isDatasetImage: null,
             isDatasetAudio: false,
             isCheckingDataset: false,
+            datasetCheckFailed: false,
           });
         },
         setDatasetSubset: (datasetSubset) => {
@@ -826,6 +936,9 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           _trainOnCompletionsManuallySet = false;
           set({
             uploadedFile,
+            datasetKnownCached: false,
+            datasetLocalPath: null,
+            datasetCheckFailed: false,
             datasetSubset: null,
             datasetSplit: null,
             datasetEvalSplit: null,
@@ -940,7 +1053,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
     },
     {
       name: "unsloth_training_config_v1",
-      version: 11,
+      version: 12,
       migrate: (persisted, version) => {
         const s = persisted as Record<string, unknown>;
         if (version < 2 && s.datasetSubset == null && s.datasetConfig != null) {
@@ -992,6 +1105,19 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           // streaming backfill when it was nested under v<10, so give it its
           // own version guard.
           s.datasetStreaming ??= false;
+        }
+        if (version < 12) {
+          const legacyToken =
+            typeof s.hfToken === "string" ? s.hfToken.trim() : "";
+          if (legacyToken && !getHfToken()) {
+            useHfTokenStore.getState().setToken(legacyToken);
+          }
+          s.hfToken = undefined;
+          s.modelKnownCached ??= false;
+          s.modelLocalPath ??= null;
+          s.modelFormat ??= null;
+          s.datasetKnownCached ??= false;
+          s.datasetLocalPath ??= null;
         }
         return s as unknown as TrainingConfigStore;
       },

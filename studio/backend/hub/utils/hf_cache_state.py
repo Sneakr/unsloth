@@ -157,6 +157,60 @@ def latest_snapshot_dir(repo_dir: Path) -> Optional[Path]:
         return None
 
 
+def ref_snapshot_dir(repo_dir: Path, ref: str = "main") -> Optional[Path]:
+    try:
+        commit = (repo_dir / "refs" / ref).read_text().strip()
+    except OSError:
+        return None
+    if not commit:
+        return None
+    snapshot = repo_dir / "snapshots" / commit
+    return snapshot if _safe_is_dir(snapshot) else None
+
+
+def latest_snapshot_from_cache_path(
+    local_path: Optional[str],
+    repo_type: str,
+    repo_id: str,
+    metadata_filenames: tuple[str, ...] = (),
+) -> Optional[str]:
+    if not local_path or not repo_id:
+        return None
+    try:
+        root = Path(local_path).expanduser()
+        if not root.exists():
+            return None
+        expected_repo_dir = target_dir_name(repo_type, repo_id)
+        if expected_repo_dir not in {part.lower() for part in root.parts}:
+            return None
+
+        def has_metadata(path: Path) -> bool:
+            if not metadata_filenames:
+                return True
+            return any((path / name).is_file() for name in metadata_filenames)
+
+        candidates: list[Path] = []
+        if root.is_dir() and has_metadata(root):
+            candidates.append(root)
+        snapshots = root / "snapshots" if root.is_dir() else None
+        if snapshots is not None and snapshots.is_dir():
+            pinned = ref_snapshot_dir(root)
+            if pinned is not None and has_metadata(pinned):
+                return str(pinned.resolve())
+            candidates.extend(
+                p for p in snapshots.iterdir() if p.is_dir() and has_metadata(p)
+            )
+        if not candidates:
+            return None
+        candidates.sort(
+            key = lambda path: path.stat().st_mtime if path.exists() else 0,
+            reverse = True,
+        )
+        return str(candidates[0].resolve())
+    except Exception:
+        return None
+
+
 def _repo_dir_has_broken_snapshot_symlinks(repo_dir: Path) -> bool:
     latest = latest_snapshot_dir(repo_dir)
     if latest is None:

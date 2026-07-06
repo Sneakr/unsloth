@@ -33,7 +33,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { MODEL_TYPE_TO_HF_TASK, PRIORITY_TRAINING_MODELS, applyPriorityOrdering } from "@/config/training";
+import { MODEL_TYPE_TO_HF_TASKS, PRIORITY_TRAINING_MODELS, applyPriorityOrdering } from "@/config/training";
 import {
   useDebouncedValue,
   useGpuInfo,
@@ -49,6 +49,7 @@ import {
   buildModelVramMap,
 } from "@/lib/vram";
 import { useTrainingConfigStore } from "@/features/training";
+import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
 import type { TrainingMethod } from "@/types/training";
 import {
   InformationCircleIcon,
@@ -68,8 +69,6 @@ export function ModelSelectionStep() {
     ensureModelDefaultsLoaded,
     trainingMethod,
     setTrainingMethod,
-    hfToken,
-    setHfToken,
   } = useTrainingConfigStore(
     useShallow((s) => ({
       modelType: s.modelType,
@@ -78,6 +77,10 @@ export function ModelSelectionStep() {
       ensureModelDefaultsLoaded: s.ensureModelDefaultsLoaded,
       trainingMethod: s.trainingMethod,
       setTrainingMethod: s.setTrainingMethod,
+    })),
+  );
+  const { hfToken, setHfToken } = useChatRuntimeStore(
+    useShallow((s) => ({
       hfToken: s.hfToken,
       setHfToken: s.setHfToken,
     })),
@@ -87,7 +90,7 @@ export function ModelSelectionStep() {
   const selectingRef = useRef(false);
   const debouncedQuery = useDebouncedValue(inputValue);
   const debouncedHfToken = useDebouncedValue(hfToken, 500);
-  const task = modelType ? MODEL_TYPE_TO_HF_TASK[modelType] : undefined;
+  const task = modelType ? MODEL_TYPE_TO_HF_TASKS[modelType] : undefined;
   const {
     results: hfResults,
     isLoading,

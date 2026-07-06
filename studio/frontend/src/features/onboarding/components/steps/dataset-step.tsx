@@ -43,6 +43,7 @@ import {
   HfDatasetSubsetSplitSelectors,
   useTrainingConfigStore,
 } from "@/features/training";
+import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
 import type { DatasetFormat } from "@/types/training";
 import {
   InformationCircleIcon,
@@ -64,9 +65,13 @@ const FORMAT_OPTIONS: { value: DatasetFormat; label: string }[] = [
 ];
 
 export function DatasetStep() {
+  const { hfToken, setHfToken } = useChatRuntimeStore(
+    useShallow((s) => ({
+      hfToken: s.hfToken,
+      setHfToken: s.setHfToken,
+    })),
+  );
   const {
-    hfToken,
-    setHfToken,
     datasetSource,
     selectHfDataset,
     selectLocalDataset,
@@ -85,8 +90,6 @@ export function DatasetStep() {
     modelType,
   } = useTrainingConfigStore(
     useShallow((s) => ({
-      hfToken: s.hfToken,
-      setHfToken: s.setHfToken,
       datasetSource: s.datasetSource,
       selectHfDataset: s.selectHfDataset,
       selectLocalDataset: s.selectLocalDataset,

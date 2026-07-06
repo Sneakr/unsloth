@@ -48,8 +48,8 @@ import {
 import {
   listLocalModels,
   type LocalModelInfo,
-  useTrainingConfigStore,
 } from "@/features/training";
+import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
 import { useHubModelSearch } from "@/features/hub/hooks/use-hub-model-search";
 import { confirmRemoteCodeIfNeeded } from "@/features/security";
 import { useDebouncedValue, useHfTokenValidation } from "@/hooks";
@@ -163,7 +163,7 @@ function siblingGgufDirectory(sourcePath: string): string | null {
 }
 
 export function ExportPage() {
-  const { hfToken, setHfToken } = useTrainingConfigStore(
+  const { hfToken, setHfToken } = useChatRuntimeStore(
     useShallow((s) => ({
       hfToken: s.hfToken,
       setHfToken: s.setHfToken,

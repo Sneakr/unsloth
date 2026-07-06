@@ -27,3 +27,7 @@ export {
   deletePerModelConfigsForModel,
   resolveInitialConfig,
 } from "./model-config/per-model-config";
+export {
+  TrainModelSelector,
+} from "./components/train-model-selector";
+export { TRAIN_PICKER_TRIGGER_CLASS } from "./components/train-picker-trigger";

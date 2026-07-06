@@ -869,6 +869,18 @@ def delete_run(id: str) -> None:
         conn.close()
 
 
+def count_runs_sharing_output_dir(output_dir: str, exclude_id: str) -> int:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM training_runs WHERE output_dir = ? AND id != ?",
+            (output_dir, exclude_id),
+        ).fetchone()
+        return int(row[0])
+    finally:
+        conn.close()
+
+
 def cleanup_orphaned_runs() -> None:
     """Mark any 'running' rows as errored on startup (server restarted mid-training)."""
     conn = get_connection()

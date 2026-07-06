@@ -33,8 +33,21 @@ def _checkpoint_step(path: Path) -> int:
         return -1
 
 
+def artifacts_present(path_value: Optional[str]) -> bool:
+    if not path_value:
+        return False
+    try:
+        path = resolve_output_dir(path_value)
+        return _is_under_outputs(path) and path.is_dir()
+    except (OSError, ValueError):
+        return False
+
+
 def get_resume_checkpoint_path(path_value: str) -> Optional[str]:
-    path = resolve_output_dir(path_value)
+    try:
+        path = resolve_output_dir(path_value)
+    except ValueError:
+        return None
     if not _is_under_outputs(path) or not path.is_dir():
         return None
     if (path / "trainer_state.json").is_file():

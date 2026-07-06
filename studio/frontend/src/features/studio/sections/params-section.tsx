@@ -2,7 +2,6 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { usePlatformStore } from "@/config/env";
-import { SectionCard } from "@/components/section-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
@@ -46,7 +45,6 @@ import type { GradientCheckpointing } from "@/types/training";
 import {
   ArrowDown01Icon,
   InformationCircleIcon,
-  Settings04Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
@@ -167,7 +165,11 @@ function formatSchedulerLabel(
   }
 }
 
-export function ParamsSection(): ReactElement {
+export function ParamsSection({
+  mode = "advanced",
+}: {
+  mode?: "simple" | "advanced";
+}): ReactElement {
   const t = useT();
   const store = useTrainingConfigStore();
   const platformDeviceType = usePlatformStore((s) => s.deviceType);
@@ -183,7 +185,7 @@ export function ParamsSection(): ReactElement {
   const showVisionImageSize = showVisionLora && !isDeepseekOcr;
   const [loraOpen, setLoraOpen] = useState(false);
   const [hyperOpen, setHyperOpen] = useState(false);
-  const needsExpandedHeight = isCpt || (isLora && loraOpen) || hyperOpen;
+  const showAdvanced = mode === "advanced";
   const [ctxInput, setCtxInput] = useState(String(store.contextLength));
   const ctxAnchorRef = useRef<HTMLDivElement>(null);
   const ctxItems = CONTEXT_LENGTHS.map(String);
@@ -218,16 +220,7 @@ export function ParamsSection(): ReactElement {
   const epochsSliderMax = Math.max(20, store.epochs, 1);
 
   return (
-    <div data-tour="studio-params" className="min-w-0">
-      <SectionCard
-        icon={<HugeiconsIcon icon={Settings04Icon} className="size-5" />}
-        title={t("studio.params.title")}
-        description={t("studio.params.description")}
-        accent="orange"
-        className={`${needsExpandedHeight
-          ? "min-h-studio-config-column"
-          : "h-studio-config-column"} duration-150`}
-      >
+    <div className="min-w-0">
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -502,7 +495,7 @@ export function ParamsSection(): ReactElement {
           )}
 
           {/* LoRA Settings */}
-          {isLora && (
+          {showAdvanced && isLora && (
             <Collapsible open={loraOpen} onOpenChange={setLoraOpen}>
               <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
                 <HugeiconsIcon
@@ -700,6 +693,7 @@ export function ParamsSection(): ReactElement {
           )}
 
           {/* Training Hyperparams */}
+          {showAdvanced && (
           <Collapsible open={hyperOpen} onOpenChange={setHyperOpen}>
             <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
               <HugeiconsIcon
@@ -1110,8 +1104,8 @@ export function ParamsSection(): ReactElement {
               </Tabs>
             </CollapsibleContent>
           </Collapsible>
+          )}
         </div>
-      </SectionCard>
     </div>
   );
 }

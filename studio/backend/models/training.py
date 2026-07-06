@@ -6,9 +6,11 @@ Pydantic schemas for Training API
 """
 
 import re
+from pathlib import Path, PureWindowsPath
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Any, Optional, List, Dict, Literal
 
+from hub.schemas.inventory import ModelFormat
 from utils.training_runs import normalize_project_name
 
 
@@ -123,9 +125,37 @@ class TrainingStartRequest(BaseModel):
         None,
         description = "sha256 fingerprint from the remote-code scan, pinning user approval of this exact custom-code version.",
     )
+    model_known_cached: bool = Field(
+        False,
+        description = "Whether the selected model is already present in the local HF cache",
+    )
+    model_local_path: Optional[str] = Field(
+        None,
+        description = "Local HF cache path for the selected model, when known",
+    )
+    model_format: Optional[ModelFormat] = Field(
+        None,
+        description = "On-disk format of the selected model, when known",
+    )
+    model_snapshot_path: Optional[str] = Field(
+        None,
+        description = "Server-verified model snapshot directory pinned for this run",
+    )
 
     # Dataset parameters
     hf_dataset: Optional[str] = Field(None, description = "HuggingFace dataset identifier")
+    dataset_known_cached: bool = Field(
+        False,
+        description = "Whether the selected HF dataset is already present in the local cache",
+    )
+    dataset_local_path: Optional[str] = Field(
+        None,
+        description = "Local HF cache path for the selected dataset, when known",
+    )
+    dataset_snapshot_path: Optional[str] = Field(
+        None,
+        description = "Server-verified dataset snapshot directory pinned for this run",
+    )
     local_datasets: List[str] = Field(
         default_factory = list, description = "List of local dataset paths"
     )
@@ -214,6 +244,27 @@ class TrainingStartRequest(BaseModel):
             raise ValueError("subset is too long (max 128 chars)")
         if not re.fullmatch(r"[A-Za-z0-9._\-]*", v):
             raise ValueError("subset may only contain letters, digits, '_', '-', '.'")
+        return v
+
+    @field_validator(
+        "model_local_path",
+        "dataset_local_path",
+        "model_snapshot_path",
+        "dataset_snapshot_path",
+    )
+    @classmethod
+    def _check_cache_local_path(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        if len(v) > 4096:
+            raise ValueError("local cache path is too long (max 4096 chars)")
+        if "\x00" in v:
+            raise ValueError("local cache path contains invalid characters")
+        if ".." in Path(v).parts or ".." in PureWindowsPath(v).parts:
+            raise ValueError("local cache path must not contain '..' segments")
         return v
 
     @field_validator("train_split", "eval_split")
@@ -614,6 +665,7 @@ class TrainingRunSummary(BaseModel):
     loss_sparkline: Optional[List[float]] = None
     can_resume: bool = False
     resumed_later: bool = False
+    artifacts_available: bool = False
     has_preview_model: bool = False
     preview_ref: Optional[str] = None
     # HMAC capability token for the `/p/{preview_ref}` share link; None when not
@@ -665,3 +717,5 @@ class TrainingRunDeleteResponse(BaseModel):
 
     status: str
     message: str
+    artifacts_deleted: bool = False
+    artifacts_kept_reason: Optional[Literal["shared_output_dir"]] = None

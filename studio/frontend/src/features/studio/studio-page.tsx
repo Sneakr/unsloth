@@ -8,35 +8,122 @@ import {
   useTrainingRuntimeLifecycle,
   useTrainingRuntimeStore,
 } from "@/features/training";
+import { useHfTokenStore } from "@/features/hub/stores/hf-token-store";
 import { GuidedTour, useGuidedTourController } from "@/features/tour";
 import { studioTourSteps, studioTrainingTourSteps } from "./tour";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useSidebar } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
+import { useShallow } from "zustand/react/shallow";
 import { DatasetPreviewDialog } from "./sections/dataset-preview-dialog";
-import { DatasetSection } from "./sections/dataset-section";
-import { ModelSection } from "./sections/model-section";
-import { ParamsSection } from "./sections/params-section";
-import { TrainingSection } from "./sections/training-section";
 import { LiveTrainingView } from "./live-training-view";
 import { HistoricalTrainingView } from "./historical-training-view";
 import { HistoryCardGrid } from "./history-card-grid";
+import { useTrainingCacheReconciliation } from "./hooks/use-training-cache-reconciliation";
+import { RunPreviewCard } from "./wizard/run-preview-card";
+import { StartTrainingCta, TrainingWizard } from "./wizard/training-wizard";
 import { useT } from "@/i18n";
+
+type TrainSubTab = "configure" | "current-run" | "history";
+
+function TrainSubNav({
+  value,
+  onChange,
+  isTrainingRunning,
+  showTrainingView,
+}: {
+  value: TrainSubTab;
+  onChange: (next: TrainSubTab) => void;
+  isTrainingRunning: boolean;
+  showTrainingView: boolean;
+}): ReactElement {
+  const t = useT();
+  const items: ReadonlyArray<{
+    value: TrainSubTab;
+    label: string;
+    disabled: boolean;
+  }> = [
+    {
+      value: "configure",
+      label: t("studio.tabs.configure"),
+      disabled: isTrainingRunning,
+    },
+    {
+      value: "current-run",
+      label: t("studio.tabs.currentRun"),
+      disabled: !showTrainingView,
+    },
+    { value: "history", label: t("studio.tabs.history"), disabled: false },
+  ];
+  return (
+    <div
+      role="tablist"
+      className="flex items-center gap-6 text-[13px] tracking-nav"
+    >
+      {items.map((item) => {
+        const active = value === item.value;
+        return (
+          <button
+            key={item.value}
+            role="tab"
+            type="button"
+            aria-selected={active}
+            disabled={item.disabled}
+            onClick={() => onChange(item.value)}
+            className={cn(
+              "relative h-9 select-none transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-[2px] after:rounded-full after:bg-foreground after:transition-opacity",
+              active
+                ? "font-semibold text-foreground after:opacity-100"
+                : "text-muted-foreground hover:text-foreground after:opacity-0",
+            )}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function StudioPage(): ReactElement {
   const t = useT();
   useTrainingRuntimeLifecycle();
+  useTrainingCacheReconciliation();
   const showTrainingView = useTrainingRuntimeStore(shouldShowTrainingView);
-  const isTrainingRunning = useTrainingRuntimeStore((state) => state.isTrainingRunning);
+  const isTrainingRunning = useTrainingRuntimeStore(
+    (state) => state.isTrainingRunning,
+  );
   const currentJobId = useTrainingRuntimeStore((state) => state.jobId);
   const runtimeMessage = useTrainingRuntimeStore((state) => state.message);
-  const isHydratingRuntime = useTrainingRuntimeStore((state) => state.isHydrating);
-  const hasHydratedRuntime = useTrainingRuntimeStore((state) => state.hasHydrated);
+  const isHydratingRuntime = useTrainingRuntimeStore(
+    (state) => state.isHydrating,
+  );
+  const hasHydratedRuntime = useTrainingRuntimeStore(
+    (state) => state.hasHydrated,
+  );
 
-  const config = useTrainingConfigStore();
+  const config = useTrainingConfigStore(
+    useShallow((s) => ({
+      datasetSource: s.datasetSource,
+      dataset: s.dataset,
+      uploadedFile: s.uploadedFile,
+      datasetSubset: s.datasetSubset,
+      datasetSplit: s.datasetSplit,
+      isVisionModel: s.isVisionModel,
+      isDatasetImage: s.isDatasetImage,
+    })),
+  );
+  const hfToken = useHfTokenStore((s) => s.token);
   const selectedModel = useTrainingConfigStore((s) => s.selectedModel);
   const ensureModelDefaultsLoaded = useTrainingConfigStore(
     (s) => s.ensureModelDefaultsLoaded,
@@ -49,9 +136,13 @@ export function StudioPage(): ReactElement {
   const dialogInitial = useDatasetPreviewDialogStore((s) => s.initialData);
   const closeDialog = useDatasetPreviewDialogStore((s) => s.close);
 
-  const [requestedTab, setRequestedTab] = useState("configure");
-  const selectedHistoryRunId = useTrainingRuntimeStore((s) => s.selectedHistoryRunId);
-  const setSelectedHistoryRunId = useTrainingRuntimeStore((s) => s.setSelectedHistoryRunId);
+  const [requestedTab, setRequestedTab] = useState<TrainSubTab>("configure");
+  const selectedHistoryRunId = useTrainingRuntimeStore(
+    (s) => s.selectedHistoryRunId,
+  );
+  const setSelectedHistoryRunId = useTrainingRuntimeStore(
+    (s) => s.setSelectedHistoryRunId,
+  );
 
   const setCurrentRunViewActive = useTrainingRuntimeStore(
     (s) => s.setCurrentRunViewActive,
@@ -64,7 +155,7 @@ export function StudioPage(): ReactElement {
   // Auto-switch to "current-run" only while training runs; afterward honour
   // the user's clicked tab. If "current-run" has nothing to show, use
   // "configure".
-  const activeTab =
+  const activeTab: TrainSubTab =
     isTrainingRunning && requestedTab !== "history"
       ? "current-run"
       : requestedTab === "current-run" && !showTrainingView
@@ -83,7 +174,8 @@ export function StudioPage(): ReactElement {
 
   const tourEnabled = hasHydratedRuntime && !isHydratingRuntime;
   const isConfigTour = activeTab === "configure";
-  const baseTourSteps = activeTab === "current-run" ? studioTrainingTourSteps : studioTourSteps;
+  const baseTourSteps =
+    activeTab === "current-run" ? studioTrainingTourSteps : studioTourSteps;
   // Inject onEnter for navbar-targeting steps so the sidebar expands during the tour.
   const tourSteps = useMemo(
     () =>
@@ -106,7 +198,11 @@ export function StudioPage(): ReactElement {
   // When training auto-switches us to "current-run", persist that in
   // requestedTab so the user stays on results after training ends.
   useEffect(() => {
-    if (isTrainingRunning && requestedTab !== "history" && requestedTab !== "current-run") {
+    if (
+      isTrainingRunning &&
+      requestedTab !== "history" &&
+      requestedTab !== "current-run"
+    ) {
       setRequestedTab("current-run");
       setSelectedHistoryRunId(null);
     }
@@ -125,7 +221,7 @@ export function StudioPage(): ReactElement {
     ensureDatasetChecked();
   }, [selectedModel, ensureModelDefaultsLoaded, ensureDatasetChecked]);
 
-  function handleTabChange(value: string) {
+  function handleTabChange(value: TrainSubTab) {
     setRequestedTab(value);
     if (value !== "history") {
       setSelectedHistoryRunId(null);
@@ -142,10 +238,80 @@ export function StudioPage(): ReactElement {
     return t("studio.subtitles.configure");
   })();
 
+  const showTrainingHydrating = !hasHydratedRuntime && isHydratingRuntime;
+  const showHistoryBack = activeTab === "history" && !!selectedHistoryRunId;
+
   return (
-    <div className="relative min-h-[calc(100dvh-var(--studio-titlebar-height,0px))] bg-background">
-      <main className="relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-6">
-        <GuidedTour {...tour.tourProps} celebrate={isConfigTour} />
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-7 px-5 pb-20 pt-8 sm:px-9 sm:pt-10">
+        <header className="font-heading flex flex-col gap-5">
+          <div className="flex flex-col gap-0.5">
+            <h1 className="page-title-halo text-[30px] font-semibold leading-[1.04] tracking-[-0.028em] text-foreground sm:text-[34px]">
+              {t("studio.routeTitle")}
+            </h1>
+            <p className="page-title-halo text-sm text-muted-foreground">
+              {subtitle}
+            </p>
+          </div>
+          {!showTrainingHydrating && (
+            <div className="flex items-center gap-3 border-b border-border/60">
+              {showHistoryBack && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="-ml-1 rounded-full text-muted-foreground"
+                  onClick={() => setSelectedHistoryRunId(null)}
+                  aria-label={t("studio.backToHistory")}
+                >
+                  <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
+                </Button>
+              )}
+              <TrainSubNav
+                value={activeTab}
+                onChange={handleTabChange}
+                isTrainingRunning={isTrainingRunning}
+                showTrainingView={showTrainingView}
+              />
+            </div>
+          )}
+        </header>
+
+        <div className="flex w-full flex-col gap-6">
+          <GuidedTour {...tour.tourProps} celebrate={isConfigTour} />
+
+          {showTrainingHydrating ? (
+            <div className="rounded-2xl border border-border/60 p-8 text-sm text-muted-foreground">
+              {t("studio.loadingRuntime")}
+            </div>
+          ) : activeTab === "configure" ? (
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10">
+              <div className="min-w-0">
+                <TrainingWizard />
+              </div>
+              <div className="lg:sticky lg:top-6 lg:self-start">
+                <RunPreviewCard startCta={<StartTrainingCta />} />
+              </div>
+            </div>
+          ) : activeTab === "current-run" ? (
+            <LiveTrainingView />
+          ) : selectedHistoryRunId ? (
+            <HistoricalTrainingView runId={selectedHistoryRunId} />
+          ) : (
+            <HistoryCardGrid
+              onSelectRun={(runId) => {
+                if (runId === currentJobId && isTrainingRunning) {
+                  handleTabChange("current-run");
+                } else {
+                  setSelectedHistoryRunId(runId);
+                }
+              }}
+              onResumeStarted={() => {
+                setSelectedHistoryRunId(null);
+                handleTabChange("current-run");
+              }}
+            />
+          )}
+        </div>
 
         <DatasetPreviewDialog
           open={dialogOpen}
@@ -154,86 +320,18 @@ export function StudioPage(): ReactElement {
           }}
           datasetSource={config.datasetSource}
           datasetName={
-            config.datasetSource === "huggingface" ? config.dataset : config.uploadedFile
+            config.datasetSource === "huggingface"
+              ? config.dataset
+              : config.uploadedFile
           }
-          hfToken={config.hfToken.trim() || null}
+          hfToken={hfToken.trim() || null}
           datasetSubset={config.datasetSubset}
           datasetSplit={config.datasetSplit}
           mode={dialogMode}
           initialData={dialogInitial}
           isVlm={config.isVisionModel && config.isDatasetImage === true}
         />
-
-        <div className="mb-6 flex flex-col gap-0.5 sm:mb-8">
-          <h1 className="text-[30px] font-semibold leading-[1.04] tracking-[-0.028em] text-foreground sm:text-[34px]">
-            {t("studio.title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-
-        {!hasHydratedRuntime && isHydratingRuntime ? (
-          <div className="rounded-xl border bg-card p-8 text-sm text-muted-foreground">
-            {t("studio.loadingRuntime")}
-          </div>
-        ) : (
-          <Tabs value={activeTab} onValueChange={handleTabChange}>
-            <div className="flex items-center gap-3 pb-3">
-              {selectedHistoryRunId && activeTab === "history" && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={() => setSelectedHistoryRunId(null)}
-                  aria-label={t("studio.backToHistory")}
-                >
-                  <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
-                </Button>
-              )}
-              <TabsList variant="line">
-                <TabsTrigger value="configure" disabled={isTrainingRunning}>
-                  {t("studio.tabs.configure")}
-                </TabsTrigger>
-                <TabsTrigger value="current-run" disabled={!showTrainingView}>
-                  {t("studio.tabs.currentRun")}
-                </TabsTrigger>
-                <TabsTrigger value="history">{t("studio.tabs.history")}</TabsTrigger>
-              </TabsList>
-            </div>
-
-            <TabsContent value="configure">
-              <div className="flex min-w-0 flex-col gap-4 md:gap-6">
-                <ModelSection />
-                <div className="grid min-w-0 grid-cols-1 items-start gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-3 xl:gap-6">
-                  <DatasetSection />
-                  <ParamsSection />
-                  <TrainingSection />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="current-run">
-              <LiveTrainingView />
-            </TabsContent>
-
-            <TabsContent value="history">
-              {selectedHistoryRunId ? (
-                <HistoricalTrainingView runId={selectedHistoryRunId} />
-              ) : (
-                <HistoryCardGrid onSelectRun={(runId) => {
-                  if (runId === currentJobId && isTrainingRunning) {
-                    handleTabChange("current-run");
-                  } else {
-                    setSelectedHistoryRunId(runId);
-                  }
-                }} onResumeStarted={() => {
-                  setSelectedHistoryRunId(null);
-                  handleTabChange("current-run");
-                }} />
-              )}
-            </TabsContent>
-          </Tabs>
-        )}
-      </main>
+      </div>
     </div>
   );
 }

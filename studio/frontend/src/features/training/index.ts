@@ -43,6 +43,7 @@ export {
   getTrainingRun,
   deleteTrainingRun,
   renameTrainingRun,
+  HistoryRequestError,
 } from "./api/history-api";
 export {
   onTrainingRunUpdated,
@@ -54,3 +55,24 @@ export {
 } from "./events";
 export { parseYamlConfig, serializeConfigToYaml } from "./lib/yaml-config";
 export { validateTrainingConfig } from "./lib/validation";
+export { useTrainingReadiness } from "./hooks/use-training-readiness";
+export { useTrainingResourceNotices } from "./hooks/use-training-resource-notices";
+export {
+  cacheLocalPathMatchesSelection,
+  cachedInventoryPathMatchesSelection,
+} from "./lib/cache-reference";
+export { validateTrainingModelCandidate } from "./lib/freeform-model-validation";
+export { isUntrainableModelFormat } from "./lib/model-support";
+export {
+  type ModelTypeCapabilityFlags,
+  resolvePickerInferredModelType,
+  trainingModelTypeFlagsFromMetadata,
+} from "./lib/model-type-inference";
+export {
+  buildCachedTrainingModelLookup,
+  buildLocalTrainingModelLookup,
+} from "./lib/training-picker-lookups";
+export {
+  TRAINING_METHOD_META,
+  TRAINING_METHOD_ORDER,
+} from "./lib/training-method-meta";

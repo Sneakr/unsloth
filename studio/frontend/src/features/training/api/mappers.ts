@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import { getHfToken } from "@/features/hub";
 import type { TrainingConfigState } from "../types/config";
 import type { TrainingStartRequest } from "../types/api";
 import {
@@ -53,7 +54,7 @@ export function buildTrainingStartPayload(
       ? [config.uploadedFile]
       : [];
   const s3Config = buildS3PayloadConfig(config);
-  let customFormatMapping: Record<string, unknown> | undefined =
+  const customFormatMapping: Record<string, unknown> | undefined =
     Object.keys(config.datasetManualMapping).length > 0
       ? { ...config.datasetManualMapping }
       : undefined;
@@ -75,7 +76,10 @@ export function buildTrainingStartPayload(
     model_name: config.selectedModel ?? "",
     project_name: (config.projectName || "").trim() || null,
     training_type: toBackendTrainingType(config.trainingMethod),
-    hf_token: config.hfToken.trim() || null,
+    hf_token: getHfToken() || null,
+    model_known_cached: config.modelKnownCached,
+    model_local_path: config.modelLocalPath,
+    model_format: config.modelFormat,
     load_in_4bit: (adapterMethod && isQloraMethod) || (isCpt && isFourBitModel),
     max_seq_length: config.contextLength,
     vision_image_size:
@@ -85,6 +89,12 @@ export function buildTrainingStartPayload(
     trust_remote_code: config.trustRemoteCode ?? false,
     approved_remote_code_fingerprint: config.approvedRemoteCodeFingerprint ?? null,
     hf_dataset: hfDataset,
+    dataset_known_cached: hfDataset && !config.datasetStreaming
+      ? config.datasetKnownCached
+      : false,
+    dataset_local_path: hfDataset && !config.datasetStreaming
+      ? config.datasetLocalPath
+      : null,
     subset: hfDataset ? config.datasetSubset : null,
     train_split: hfDataset ? config.datasetSplit : null,
     eval_split: hfDataset ? config.datasetEvalSplit : null,

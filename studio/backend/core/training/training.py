@@ -107,7 +107,7 @@ def _sanitize_db_config(config: dict[str, Any]) -> dict[str, Any]:
     db_config = {
         k: v
         for k, v in config.items()
-        if k not in {"hf_token", "wandb_token", "s3_config", "subject"}
+        if k not in {"hf_token", "wandb_token", "s3_config", "subject", "cache_pin_warnings"}
     }
     s3_config = config.get("s3_config")
     if hasattr(s3_config, "model_dump"):
@@ -121,6 +121,122 @@ def _sanitize_db_config(config: dict[str, Any]) -> dict[str, Any]:
             "use_iam_role": bool(s3_config.get("use_iam_role")),
         }
     return db_config
+
+
+_MODEL_SNAPSHOT_METADATA = ("config.json", "adapter_config.json")
+
+
+def _resolve_model_snapshot(model_name: str, local_path: Optional[str]) -> Optional[str]:
+    from hub.utils.hf_cache_state import (
+        iter_repo_cache_dirs,
+        latest_snapshot_from_cache_path,
+        ref_snapshot_dir,
+    )
+
+    snapshot = latest_snapshot_from_cache_path(
+        local_path, "model", model_name, _MODEL_SNAPSHOT_METADATA
+    )
+    if snapshot:
+        return snapshot
+    for repo_dir in iter_repo_cache_dirs("model", model_name):
+        candidate = ref_snapshot_dir(repo_dir)
+        if candidate is not None and any(
+            (candidate / name).is_file() for name in _MODEL_SNAPSHOT_METADATA
+        ):
+            return str(candidate.resolve())
+    from hub.utils.inventory_scan import resolve_snapshot_dir_for_scan
+
+    snapshot_dir = resolve_snapshot_dir_for_scan("model", model_name)
+    if snapshot_dir is not None and any(
+        (snapshot_dir / name).is_file() for name in _MODEL_SNAPSHOT_METADATA
+    ):
+        return str(snapshot_dir.resolve())
+    return None
+
+
+def _snapshot_declares_quantization(snapshot_path: str) -> bool:
+    """True when a cached model snapshot already ships pre-quantized weights
+    (e.g. an Unsloth ``*-bnb-4bit`` checkpoint), detected via a
+    ``quantization_config`` in its ``config.json``."""
+    try:
+        with open(os.path.join(snapshot_path, "config.json"), encoding = "utf-8") as fh:
+            return bool(_json.load(fh).get("quantization_config"))
+    except (OSError, ValueError):
+        return False
+
+
+def _apply_cache_pins(config: dict[str, Any]) -> None:
+    warnings: list[str] = []
+    resume = bool(config.get("resume_from_checkpoint"))
+    model_name = config["model_name"]
+    requested_pin = config.get("model_snapshot_path")
+    model_claimed = bool(config.get("model_known_cached") or config.get("model_local_path"))
+    if resume and requested_pin:
+        from hub.utils.hf_cache_state import latest_snapshot_from_cache_path
+
+        pin = latest_snapshot_from_cache_path(
+            requested_pin, "model", model_name, _MODEL_SNAPSHOT_METADATA
+        )
+        if pin is None:
+            warnings.append(
+                f"The cached model snapshot this run was trained from is no longer on "
+                f"disk; resuming by downloading {model_name} from Hugging Face — base "
+                f"weights may differ from the original run."
+            )
+        config["model_snapshot_path"] = pin
+    elif model_claimed:
+        pin = _resolve_model_snapshot(model_name, config.get("model_local_path"))
+        if (
+            pin is not None
+            and config.get("load_in_4bit")
+            and not _snapshot_declares_quantization(pin)
+        ):
+            # Loading a full-precision snapshot from a local directory would
+            # quantize on the fly. Loading by repo id instead lets Unsloth
+            # redirect to its pre-quantized (dynamic 4-bit) weights, matching a
+            # non-cached run's numerics/VRAM, so drop the pin here.
+            warnings.append(
+                f"Cached copy of {model_name} is full-precision; loading Unsloth's "
+                f"pre-quantized 4-bit weights instead (may download from Hugging Face)."
+            )
+            pin = None
+        elif pin is None:
+            warnings.append(
+                f"Cached copy of {model_name} not found on disk; downloading from Hugging Face."
+            )
+        config["model_snapshot_path"] = pin
+    else:
+        config["model_snapshot_path"] = None
+
+    hf_dataset = config.get("hf_dataset") or ""
+    requested_ds_pin = config.get("dataset_snapshot_path")
+    ds_claimed = bool(config.get("dataset_known_cached") or config.get("dataset_local_path"))
+    if not hf_dataset or config.get("dataset_streaming"):
+        config["dataset_snapshot_path"] = None
+    elif resume and requested_ds_pin:
+        from hub.utils.dataset_cache import dataset_snapshot_from_cache_path
+
+        snap = dataset_snapshot_from_cache_path(requested_ds_pin, hf_dataset)
+        if snap is None:
+            warnings.append(
+                f"The cached dataset snapshot this run was trained from is no longer on "
+                f"disk; resuming by downloading {hf_dataset} from Hugging Face."
+            )
+        config["dataset_snapshot_path"] = str(snap) if snap else None
+    elif ds_claimed:
+        from hub.utils.dataset_cache import latest_cached_dataset_snapshot
+
+        snap = latest_cached_dataset_snapshot(hf_dataset, config.get("dataset_local_path"))
+        if snap is None:
+            warnings.append(
+                f"Cached copy of dataset {hf_dataset} not found on disk; downloading from "
+                f"Hugging Face."
+            )
+        config["dataset_snapshot_path"] = str(snap) if snap else None
+    else:
+        config["dataset_snapshot_path"] = None
+
+    config["cache_pin_warnings"] = warnings
 
 
 def _s3_dataset_name(s3_dataset: Any) -> Optional[str]:
@@ -306,6 +422,13 @@ class TrainingBackend:
             "max_seq_length": kwargs.get("max_seq_length", 2048),
             "vision_image_size": kwargs.get("vision_image_size"),
             "hf_dataset": kwargs.get("hf_dataset", ""),
+            "model_known_cached": kwargs.get("model_known_cached", False),
+            "model_local_path": kwargs.get("model_local_path"),
+            "model_format": kwargs.get("model_format"),
+            "model_snapshot_path": kwargs.get("model_snapshot_path"),
+            "dataset_known_cached": kwargs.get("dataset_known_cached", False),
+            "dataset_local_path": kwargs.get("dataset_local_path"),
+            "dataset_snapshot_path": kwargs.get("dataset_snapshot_path"),
             "local_datasets": kwargs.get("local_datasets"),
             "local_eval_datasets": kwargs.get("local_eval_datasets"),
             "format_type": kwargs.get("format_type", ""),
@@ -376,6 +499,8 @@ class TrainingBackend:
         # Full finetuning always runs in 16-bit; LoRA/QLoRA/CPT keep the request.
         if config["training_type"] == "Full Finetuning":
             config["load_in_4bit"] = False
+
+        _apply_cache_pins(config)
 
         # Split GPU validation from placement around the VRAM hook:
         #   * Explicit gpu_ids are validated here (raises -> the route returns 400
@@ -717,6 +842,19 @@ class TrainingBackend:
                 return True
 
             return False
+
+    def active_output_dir(self) -> Optional[str]:
+        if not self.is_training_active():
+            return None
+        config = self._db_config or {}
+        output_dir = config.get("output_dir")
+        if not output_dir:
+            from .worker import _output_dir_from_resume_checkpoint
+
+            output_dir = _output_dir_from_resume_checkpoint(
+                config.get("resume_from_checkpoint")
+            )
+        return str(output_dir) if output_dir else None
 
     def get_training_status(self, theme: str = "light") -> Tuple:
         """Get current training status and loss plot."""

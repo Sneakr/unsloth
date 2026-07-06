@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import { Checkbox } from "@/components/ui/checkbox";
+import { bumpInventoryVersion } from "@/features/hub/stores/inventory-events";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +20,7 @@ import {
   getTrainingRunDisplayTitle,
   getTrainingRunModelSubtitle,
   emitTrainingRunDeleted,
+  HistoryRequestError,
   listTrainingRuns,
   onTrainingRunDeleted,
   onTrainingRunsChanged,
@@ -86,6 +89,16 @@ function wasContinuedInVisibleRuns(
       other.output_dir === run.output_dir &&
       (other.status === "stopped" || other.status === "completed") &&
       new Date(other.started_at).getTime() > startedAt,
+  );
+}
+
+function sharesOutputDirInVisibleRuns(
+  run: TrainingRunSummary,
+  runs: TrainingRunSummary[],
+): boolean {
+  if (!run.output_dir) return false;
+  return runs.some(
+    (other) => other.id !== run.id && other.output_dir === run.output_dir,
   );
 }
 
@@ -195,6 +208,7 @@ export function HistoryCardGrid({
   const [error, setError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleteArtifacts, setDeleteArtifacts] = useState(false);
   const [resumeTarget, setResumeTarget] = useState<string | null>(null);
   const [manualFetchInFlight, setManualFetchInFlight] = useState(false);
   const { resumeTrainingRunFromHistory } = useTrainingActions();
@@ -319,7 +333,15 @@ export function HistoryCardGrid({
     if (!deleteTarget) return;
     setDeleteError(null);
     try {
-      await deleteTrainingRun(deleteTarget);
+      const result = await deleteTrainingRun(deleteTarget, { deleteArtifacts });
+      if (deleteArtifacts) {
+        bumpInventoryVersion();
+        if (result.artifacts_kept_reason === "shared_output_dir") {
+          toast.info(translate("studio.history.artifactsKeptShared"));
+        } else if (!result.artifacts_deleted) {
+          toast.error(translate("studio.history.deleteArtifactsFailed"));
+        }
+      }
       emitTrainingRunDeleted(deleteTarget);
       // Re-fetch preserving visible count so "Load more" offsets stay consistent.
       const currentCount = runs.length - 1;
@@ -327,10 +349,17 @@ export function HistoryCardGrid({
       fetchRuns(0, false, limit).catch(() => {
         // Refresh failed; card is already removed, no stale display.
       });
-    } catch {
-      setDeleteError(translate("studio.history.deleteError"));
+    } catch (err) {
+      setDeleteError(
+        err instanceof HistoryRequestError &&
+          err.status === 409 &&
+          deleteArtifacts
+          ? translate("studio.history.deleteArtifactsActiveError")
+          : translate("studio.history.deleteError"),
+      );
     }
     setDeleteTarget(null);
+    setDeleteArtifacts(false);
   };
 
   const handleResume = async (runId: string) => {
@@ -372,6 +401,12 @@ export function HistoryCardGrid({
     );
   }
 
+  const deleteTargetRun = runs.find((run) => run.id === deleteTarget);
+  const deleteTargetShared =
+    !!deleteTargetRun &&
+    (deleteTargetRun.resumed_later ||
+      sharesOutputDirInVisibleRuns(deleteTargetRun, runs));
+
   return (
     <div className="contents" aria-label={t("studio.history.title")}>
       {deleteError && (
@@ -387,7 +422,10 @@ export function HistoryCardGrid({
             ? statusBadge.resumed_later
             : (statusBadge[run.status] ?? statusBadge.error);
           const isRunning = run.status === "running";
-          const canResume = run.can_resume && !wasContinued;
+          const artifactsMissing =
+            run.artifacts_available === false && run.status !== "running";
+          const canResume =
+            run.can_resume && !wasContinued && !artifactsMissing;
           const isResuming = resumeTarget === run.id;
 
           const title = getTrainingRunDisplayTitle(run);
@@ -404,10 +442,8 @@ export function HistoryCardGrid({
               tabIndex={0}
               key={run.id}
               className={cn(
-                "group relative flex h-[11.5rem] cursor-pointer flex-col gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:border-border hover:bg-accent/30",
-                isRunning
-                  ? "border-blue-400/50 dark:border-blue-500/30"
-                  : "border-border/60",
+                "elevated-card group relative flex h-[11.5rem] cursor-pointer flex-col gap-3 bg-card p-4 text-left transition-colors hover:bg-accent/30",
+                isRunning && "!border-blue-400/50 dark:!border-blue-500/30",
                 (canResume || canCopyPreview) && "gap-2",
               )}
               onClick={() => onSelectRun(run.id)}
@@ -428,6 +464,11 @@ export function HistoryCardGrid({
                   {isRunning && <Spinner className="size-2.5" />}
                   {formatStatusLabel(wasContinued ? "resumed_later" : run.status, t)}
                 </span>
+                {artifactsMissing && (
+                  <span className="inline-flex items-center rounded-full bg-foreground/[0.05] px-2 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/[0.06]">
+                    {t("studio.history.filesDeleted")}
+                  </span>
+                )}
                 <span className="text-[10px] text-muted-foreground">
                   {formatRelativeTime(run.started_at, t)}
                 </span>
@@ -572,7 +613,10 @@ export function HistoryCardGrid({
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteArtifacts(false);
+          }
         }}
       >
         <AlertDialogContent>
@@ -582,6 +626,32 @@ export function HistoryCardGrid({
               {t("studio.history.deleteDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteTargetRun?.artifacts_available === true && (
+            <label
+              htmlFor="delete-run-artifacts"
+              className="flex cursor-pointer items-start gap-2 text-sm"
+            >
+              <Checkbox
+                id="delete-run-artifacts"
+                checked={deleteArtifacts}
+                onCheckedChange={(value) => setDeleteArtifacts(!!value)}
+                className="mt-0.5"
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-foreground">
+                  {t("studio.history.deleteArtifactsLabel")}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t("studio.history.deleteArtifactsDescription")}
+                </span>
+                {deleteTargetShared && (
+                  <span className="text-xs text-amber-600 dark:text-amber-400">
+                    {t("studio.history.deleteArtifactsSharedNote")}
+                  </span>
+                )}
+              </span>
+            </label>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction

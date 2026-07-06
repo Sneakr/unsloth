@@ -62,6 +62,59 @@ def _output_dir_from_resume_checkpoint(resume_from_checkpoint: str | None) -> st
     return str(path.parent if path.name.startswith("checkpoint-") else path)
 
 
+def _model_local_files_only(config: dict) -> bool:
+    return bool(config.get("model_snapshot_path"))
+
+
+def _dataset_local_files_only(config: dict) -> bool:
+    return bool(config.get("dataset_snapshot_path"))
+
+
+def _untrainable_model_format_error(config: dict) -> str | None:
+    model_format = str(config.get("model_format") or "").strip().lower()
+    if model_format == "gguf":
+        return "GGUF models are inference-only and cannot be trained."
+    if model_format == "adapter":
+        return "Adapter models are inference-only and cannot be trained as base models."
+    return None
+
+
+def _resolve_cached_model_load_name(config: dict) -> str:
+    return config.get("model_snapshot_path") or config["model_name"]
+
+
+def _drop_model_pin(config: dict) -> str:
+    config["model_snapshot_path"] = None
+    return config["model_name"]
+
+
+def _verify_config_pins(config: dict, event_queue: Any) -> None:
+    for message in config.get("cache_pin_warnings") or []:
+        _send_status(event_queue, message)
+    for key in ("model_snapshot_path", "dataset_snapshot_path"):
+        value = config.get(key)
+        if value and not os.path.isdir(value):
+            config[key] = None
+
+
+def _cached_dataset_training_files_for_config(config: dict, split: str | None) -> list[str]:
+    hf_dataset = config.get("hf_dataset")
+    local_path = config.get("dataset_snapshot_path")
+    if not hf_dataset or not local_path:
+        return []
+    try:
+        from hub.utils.dataset_cache import cached_dataset_training_files
+
+        return cached_dataset_training_files(
+            hf_dataset,
+            local_path,
+            subset = config.get("subset"),
+            train_split = split or "train",
+        )
+    except Exception:
+        return []
+
+
 _CAUSAL_CONV1D_RELEASE_TAG = "v1.6.1.post4"
 _CAUSAL_CONV1D_PACKAGE_VERSION = "1.6.1"
 _MAMBA_SSM_RELEASE_TAG = "v2.3.1"
@@ -1432,6 +1485,8 @@ def _run_mlx_training(event_queue, stop_queue, config):
     hf_token = config.get("hf_token") or None
     if hf_token:
         os.environ["HF_TOKEN"] = hf_token
+    model_load_name = _resolve_cached_model_load_name(config)
+    model_local_only = _model_local_files_only(config)
 
     if config.get("use_loftq"):
         message = "LoftQ is not supported for MLX training yet."
@@ -1540,15 +1595,36 @@ def _run_mlx_training(event_queue, stop_queue, config):
             )
             return
 
-    model, tokenizer = FastMLXModel.from_pretrained(
-        model_name,
-        load_in_4bit = config.get("load_in_4bit", True),
-        full_finetuning = not use_lora,
-        text_only = None if is_dataset_image else True,
-        token = hf_token,
-        trust_remote_code = bool(config.get("trust_remote_code", False)),
-        random_state = model_random_state,
-    )
+    try:
+        model, tokenizer = FastMLXModel.from_pretrained(
+            model_load_name,
+            load_in_4bit = config.get("load_in_4bit", True),
+            full_finetuning = not use_lora,
+            text_only = None if is_dataset_image else True,
+            token = hf_token,
+            trust_remote_code = bool(config.get("trust_remote_code", False)),
+            random_state = model_random_state,
+        )
+    except Exception:
+        if not model_local_only:
+            raise
+        _send(
+            "status",
+            status_message = (
+                f"Cached files for {model_name} are incomplete; retrying from Hugging Face..."
+            ),
+        )
+        model_load_name = _drop_model_pin(config)
+        model_local_only = False
+        model, tokenizer = FastMLXModel.from_pretrained(
+            model_load_name,
+            load_in_4bit = config.get("load_in_4bit", True),
+            full_finetuning = not use_lora,
+            text_only = None if is_dataset_image else True,
+            token = hf_token,
+            trust_remote_code = bool(config.get("trust_remote_code", False)),
+            random_state = model_random_state,
+        )
 
     is_vlm = bool(is_dataset_image and getattr(model, "_is_vlm_model", False))
     model._is_vlm_model = is_vlm
@@ -1649,10 +1725,24 @@ def _run_mlx_training(event_queue, stop_queue, config):
         return load_dataset(loader, data_files = all_files, split = "train")
 
     if hf_dataset:
-        load_kwargs = {"split": train_split, "token": hf_token}
-        if subset:
-            load_kwargs["name"] = subset
-        dataset = load_dataset(hf_dataset, **load_kwargs)
+        dataset = None
+        cached_files = _cached_dataset_training_files_for_config(config, train_split)
+        if cached_files:
+            _send("status", status_message = f"Loading cached dataset: {hf_dataset}")
+            loader = _mlx_local_dataset_loader_for_files(cached_files)
+            try:
+                dataset = load_dataset(loader, data_files = cached_files, split = "train")
+            except Exception:
+                _send(
+                    "status",
+                    status_message = "Cached dataset files unreadable; downloading from the Hub...",
+                )
+                dataset = None
+        if dataset is None:
+            load_kwargs = {"split": train_split, "token": hf_token}
+            if subset:
+                load_kwargs["name"] = subset
+            dataset = load_dataset(hf_dataset, **load_kwargs)
         dataset = _slice(dataset)
     elif config.get("local_datasets"):
         dataset = _load_local(config["local_datasets"])
@@ -1683,11 +1773,22 @@ def _run_mlx_training(event_queue, stop_queue, config):
     # Eval dataset (separate split or local file)
     eval_dataset = None
     if eval_split and hf_dataset:
-        eval_kwargs = {"split": eval_split, "token": hf_token}
-        if subset:
-            eval_kwargs["name"] = subset
         try:
-            eval_dataset = load_dataset(hf_dataset, **eval_kwargs)
+            eval_dataset = None
+            cached_eval_files = _cached_dataset_training_files_for_config(config, eval_split)
+            if cached_eval_files:
+                loader = _mlx_local_dataset_loader_for_files(cached_eval_files)
+                try:
+                    eval_dataset = load_dataset(
+                        loader, data_files = cached_eval_files, split = "train"
+                    )
+                except Exception:
+                    eval_dataset = None
+            if eval_dataset is None:
+                eval_kwargs = {"split": eval_split, "token": hf_token}
+                if subset:
+                    eval_kwargs["name"] = subset
+                eval_dataset = load_dataset(hf_dataset, **eval_kwargs)
         except Exception as e:
             _send("status", status_message = f"Eval split load failed: {e}")
             eval_dataset = None
@@ -2133,7 +2234,21 @@ def run_training_process(*, event_queue: Any, stop_queue: Any, config: dict) -> 
 
     apply_gpu_ids(config.get("resolved_gpu_ids"))
 
+    _verify_config_pins(config, event_queue)
+
     model_name = config["model_name"]
+
+    format_error = _untrainable_model_format_error(config)
+    if format_error:
+        event_queue.put(
+            {
+                "type": "error",
+                "error": format_error,
+                "stack": "",
+                "ts": time.time(),
+            }
+        )
+        return
 
     # ── 0. MLX FAST-PATH (must run before any torch/transformers imports) ──
     # Apple Silicon uses MLXTrainer directly -- skip torch imports / installs.
@@ -2792,17 +2907,42 @@ def run_training_process(*, event_queue: Any, stop_queue: Any, config: dict) -> 
     try:
         hf_token = config.get("hf_token", "")
         hf_token = hf_token if hf_token and hf_token.strip() else None
+        model_load_name = _resolve_cached_model_load_name(config)
+        model_local_only = _model_local_files_only(config)
+        dataset_local_only = _dataset_local_files_only(config)
 
         # ── 4a. Lightweight detection + tokenizer (no VRAM) ──
         _send_status(event_queue, "Detecting model type...")
-        trainer.pre_detect_and_load_tokenizer(
-            model_name = model_name,
-            max_seq_length = config["max_seq_length"],
-            hf_token = hf_token,
-            is_dataset_image = config.get("is_dataset_image", False),
-            is_dataset_audio = config.get("is_dataset_audio", False),
-            trust_remote_code = config.get("trust_remote_code", False),
-        )
+        try:
+            trainer.pre_detect_and_load_tokenizer(
+                model_name = model_name,
+                max_seq_length = config["max_seq_length"],
+                hf_token = hf_token,
+                is_dataset_image = config.get("is_dataset_image", False),
+                is_dataset_audio = config.get("is_dataset_audio", False),
+                trust_remote_code = config.get("trust_remote_code", False),
+                model_load_name = model_load_name,
+                local_files_only = model_local_only,
+            )
+        except Exception:
+            if not model_local_only:
+                raise
+            _send_status(
+                event_queue,
+                f"Cached files for {model_name} are incomplete; retrying from Hugging Face...",
+            )
+            model_load_name = _drop_model_pin(config)
+            model_local_only = False
+            trainer.pre_detect_and_load_tokenizer(
+                model_name = model_name,
+                max_seq_length = config["max_seq_length"],
+                hf_token = hf_token,
+                is_dataset_image = config.get("is_dataset_image", False),
+                is_dataset_audio = config.get("is_dataset_audio", False),
+                trust_remote_code = config.get("trust_remote_code", False),
+                model_load_name = model_load_name,
+                local_files_only = model_local_only,
+            )
         if trainer.should_stop:
             event_queue.put({"type": "complete", "output_dir": None, "ts": time.time()})
             return
@@ -2827,6 +2967,8 @@ def run_training_process(*, event_queue: Any, stop_queue: Any, config: dict) -> 
             dataset_slice_end = config.get("dataset_slice_end"),
             is_cpt = _is_cpt_for_dataset,
             s3_config = config.get("s3_config"),
+            dataset_local_files_only = dataset_local_only,
+            dataset_local_path = config.get("dataset_snapshot_path"),
         )
 
         if isinstance(dataset_result, tuple):
@@ -2915,7 +3057,29 @@ def run_training_process(*, event_queue: Any, stop_queue: Any, config: dict) -> 
                 is_dataset_audio = config.get("is_dataset_audio", False),
                 trust_remote_code = config.get("trust_remote_code", False),
                 gpu_ids = config.get("resolved_gpu_ids"),
+                model_load_name = model_load_name,
+                local_files_only = model_local_only,
             )
+            if not success and model_local_only and not trainer.should_stop:
+                _send_status(
+                    event_queue,
+                    f"Cached files for {model_name} are incomplete; retrying from Hugging Face...",
+                )
+                model_load_name = _drop_model_pin(config)
+                model_local_only = False
+                success = trainer.load_model(
+                    model_name = model_name,
+                    max_seq_length = config["max_seq_length"],
+                    load_in_4bit = config["load_in_4bit"],
+                    full_finetuning = not use_lora,
+                    hf_token = hf_token,
+                    is_dataset_image = config.get("is_dataset_image", False),
+                    is_dataset_audio = config.get("is_dataset_audio", False),
+                    trust_remote_code = config.get("trust_remote_code", False),
+                    gpu_ids = config.get("resolved_gpu_ids"),
+                    model_load_name = model_load_name,
+                    local_files_only = model_local_only,
+                )
         finally:
             _load_watchdog_stop.set()
             event_queue.put({"type": "model_load_completed", "ts": time.time()})
@@ -3178,6 +3342,8 @@ def _run_embedding_training(event_queue: Any, stop_queue: Any, config: dict) -> 
     import threading
 
     model_name = config["model_name"]
+    model_load_name = _resolve_cached_model_load_name(config)
+    model_local_only = _model_local_files_only(config)
     training_start_time = time.time()
 
     # ── 1. Import embedding-specific libraries ──
@@ -3312,12 +3478,28 @@ def _run_embedding_training(event_queue: Any, stop_queue: Any, config: dict) -> 
                 )
                 return
 
-        model = FastSentenceTransformer.from_pretrained(
-            model_name = model_name,
-            max_seq_length = max_seq_length,
-            full_finetuning = not use_lora,
-            token = hf_token,
-        )
+        try:
+            model = FastSentenceTransformer.from_pretrained(
+                model_name = model_load_name,
+                max_seq_length = max_seq_length,
+                full_finetuning = not use_lora,
+                token = hf_token,
+            )
+        except Exception:
+            if not model_local_only:
+                raise
+            _send_status(
+                event_queue,
+                f"Cached files for {model_name} are incomplete; retrying from Hugging Face...",
+            )
+            model_load_name = _drop_model_pin(config)
+            model_local_only = False
+            model = FastSentenceTransformer.from_pretrained(
+                model_name = model_load_name,
+                max_seq_length = max_seq_length,
+                full_finetuning = not use_lora,
+                token = hf_token,
+            )
     except Exception as e:
         event_queue.put(
             {
@@ -3428,14 +3610,27 @@ def _run_embedding_training(event_queue: Any, stop_queue: Any, config: dict) -> 
             return load_dataset(loader, data_files = all_files, split = "train")
 
         if hf_dataset and hf_dataset.strip():
-            hf_token = config.get("hf_token", "")
-            hf_token = hf_token if hf_token and hf_token.strip() else None
-            dataset = load_dataset(
-                hf_dataset.strip(),
-                subset,
-                split = train_split,
-                token = hf_token,
-            )
+            dataset = None
+            cached_files = _cached_dataset_training_files_for_config(config, train_split)
+            if cached_files:
+                _send_status(event_queue, f"Loading cached dataset: {hf_dataset.strip()}")
+                try:
+                    dataset = _load_local_embedding_dataset(cached_files)
+                except Exception:
+                    _send_status(
+                        event_queue,
+                        "Cached dataset files unreadable; downloading from the Hub...",
+                    )
+                    dataset = None
+            if dataset is None:
+                hf_token = config.get("hf_token", "")
+                hf_token = hf_token if hf_token and hf_token.strip() else None
+                dataset = load_dataset(
+                    hf_dataset.strip(),
+                    subset,
+                    split = train_split,
+                    token = hf_token,
+                )
         elif local_datasets:
             dataset = _load_local_embedding_dataset(local_datasets)
         elif config.get("s3_config"):

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import { normalizeHfToken } from "@/features/hub/stores/hf-token-store";
 import { toast } from "@/lib/toast";
 import { create } from "zustand";
 import { isExternalModelId, parseExternalModelId } from "../external-providers";
@@ -1159,7 +1160,8 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
       setScalarSettingVersion("autoTitle", autoTitle, state.autoTitle);
       return { autoTitle };
     }),
-  setHfToken: (hfToken) => {
+  setHfToken: (raw) => {
+    const hfToken = normalizeHfToken(raw);
     saveString(HF_TOKEN_KEY, hfToken);
     set({ hfToken });
     notifyHfTokenChanged(hfToken);

@@ -175,6 +175,8 @@ class UnslothTrainer:
         is_dataset_image: bool = False,
         is_dataset_audio: bool = False,
         trust_remote_code: bool = False,
+        model_load_name: Optional[str] = None,
+        local_files_only: bool = False,
     ) -> None:
         """Lightweight detection and tokenizer load — no model weights, no VRAM.
 
@@ -187,12 +189,15 @@ class UnslothTrainer:
         self.model_name = model_name
         self.max_seq_length = max_seq_length
         self.trust_remote_code = trust_remote_code
+        lookup_name = model_load_name or model_name
 
         if hf_token:
             os.environ["HF_TOKEN"] = hf_token
 
         # --- Detect audio type (reads config.json only, no VRAM) ---
-        self._audio_type = detect_audio_type(model_name, hf_token)
+        self._audio_type = detect_audio_type(
+            lookup_name, hf_token, local_files_only = local_files_only
+        )
         if self._audio_type == "audio_vlm":
             self.is_audio = False
             self.is_audio_vlm = is_dataset_audio
@@ -205,7 +210,13 @@ class UnslothTrainer:
             self._cuda_audio_used = False
 
         # --- Detect VLM ---
-        vision = is_vision_model(model_name, hf_token = hf_token) if not self.is_audio else False
+        vision = (
+            is_vision_model(
+                lookup_name, hf_token = hf_token, local_files_only = local_files_only
+            )
+            if not self.is_audio
+            else False
+        )
         self.is_vlm = not self.is_audio_vlm and vision and is_dataset_image
 
         logger.info(
@@ -222,16 +233,18 @@ class UnslothTrainer:
         if self._audio_type == "whisper":
             from transformers import AutoProcessor
             self.tokenizer = AutoProcessor.from_pretrained(
-                model_name,
+                lookup_name,
                 trust_remote_code = trust_remote_code,
                 token = hf_token,
+                local_files_only = local_files_only,
             )
         else:
             from transformers import AutoTokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
+                lookup_name,
                 trust_remote_code = trust_remote_code,
                 token = hf_token,
+                local_files_only = local_files_only,
             )
 
         logger.info("Pre-loaded tokenizer for %s", model_name)
@@ -510,10 +523,13 @@ class UnslothTrainer:
         trust_remote_code: bool = False,
         full_finetuning: bool = False,
         gpu_ids: Optional[list[int]] = None,
+        model_load_name: Optional[str] = None,
+        local_files_only: bool = False,
     ) -> bool:
         """Load model for training (supports both text and vision models)"""
         self.load_in_4bit = load_in_4bit  # For training_meta.json
         self.trust_remote_code = trust_remote_code  # For AutoProcessor etc. used during training
+        lookup_name = model_load_name or model_name
         try:
             if self.model is not None:
                 del self.model
@@ -550,7 +566,9 @@ class UnslothTrainer:
             _preserve = ["Unsloth*Trainer.py"] if sys.platform in ("win32", "darwin") else None
             clear_unsloth_compiled_cache(preserve_patterns = _preserve)
             # Detect audio model type dynamically (config.json + tokenizer)
-            self._audio_type = detect_audio_type(model_name, hf_token)
+            self._audio_type = detect_audio_type(
+                lookup_name, hf_token, local_files_only = local_files_only
+            )
             # audio_vlm is detected as an audio_type now; handle separately
             if self._audio_type == "audio_vlm":
                 self.is_audio = False
@@ -564,7 +582,13 @@ class UnslothTrainer:
                 self._cuda_audio_used = False
 
             # VLM: vision model + image dataset (mutually exclusive with audio)
-            vision = is_vision_model(model_name, hf_token = hf_token) if not self.is_audio else False
+            vision = (
+                is_vision_model(
+                    lookup_name, hf_token = hf_token, local_files_only = local_files_only
+                )
+                if not self.is_audio
+                else False
+            )
             self.is_vlm = not self.is_audio_vlm and vision and is_dataset_image
             self.model_name = model_name
             self.max_seq_length = max_seq_length
@@ -599,7 +623,7 @@ class UnslothTrainer:
 
             # Proactive gated-model check before from_pretrained (catches all
             # gated/private models). Skip when offline -- it uses the cache.
-            if "/" in model_name and not _env_offline():
+            if "/" in model_name and not local_files_only and not _env_offline():
                 try:
                     from huggingface_hub import model_info as hf_model_info
                     info = hf_model_info(model_name, token = hf_token or None)
@@ -651,7 +675,7 @@ class UnslothTrainer:
                 from transformers import CsmForConditionalGeneration
 
                 self.model, self.tokenizer = FastModel.from_pretrained(
-                    model_name = model_name,
+                    model_name = lookup_name,
                     max_seq_length = max_seq_length,
                     dtype = _auto_dtype,
                     auto_model = CsmForConditionalGeneration,
@@ -669,7 +693,7 @@ class UnslothTrainer:
                 from transformers import WhisperForConditionalGeneration
 
                 self.model, self.tokenizer = FastModel.from_pretrained(
-                    model_name = model_name,
+                    model_name = lookup_name,
                     dtype = _auto_dtype,
                     load_in_4bit = False,
                     device_map = device_map,
@@ -690,7 +714,7 @@ class UnslothTrainer:
             elif self._audio_type == "snac":
                 # Orpheus: language model with audio codec tokens
                 self.model, self.tokenizer = FastLanguageModel.from_pretrained(
-                    model_name = model_name,
+                    model_name = lookup_name,
                     max_seq_length = max_seq_length,
                     dtype = _auto_dtype,
                     load_in_4bit = load_in_4bit,
@@ -719,7 +743,11 @@ class UnslothTrainer:
                     local_dir = model_name.split("/")[-1]
                     llm_path = f"{local_dir}/LLM"
 
-                repo_path = snapshot_download(hf_repo, local_dir = local_dir)
+                repo_path = snapshot_download(
+                    hf_repo,
+                    local_dir = local_dir,
+                    local_files_only = local_files_only,
+                )
                 self._spark_tts_repo_dir = os.path.abspath(repo_path)  # Absolute for sys.path
                 llm_path = os.path.join(self._spark_tts_repo_dir, "LLM")
 
@@ -739,7 +767,7 @@ class UnslothTrainer:
                 # OuteTTS: uses FastModel (not FastLanguageModel) with load_in_4bit=False
                 from unsloth import FastModel
                 self.model, self.tokenizer = FastModel.from_pretrained(
-                    model_name,
+                    lookup_name,
                     max_seq_length = max_seq_length,
                     load_in_4bit = False,
                     device_map = device_map,
@@ -754,7 +782,7 @@ class UnslothTrainer:
                 # FastModel (general loader) returns (model, processor).
                 from unsloth import FastModel
                 self.model, self.tokenizer = FastModel.from_pretrained(
-                    model_name = model_name,
+                    model_name = lookup_name,
                     max_seq_length = max_seq_length,
                     dtype = _auto_dtype,
                     load_in_4bit = load_in_4bit,
@@ -768,7 +796,7 @@ class UnslothTrainer:
             elif self.is_vlm:
                 # Load vision model - returns (model, tokenizer)
                 self.model, self.tokenizer = FastVisionModel.from_pretrained(
-                    model_name = model_name,
+                    model_name = lookup_name,
                     max_seq_length = max_seq_length,
                     dtype = _auto_dtype,
                     load_in_4bit = load_in_4bit,
@@ -795,7 +823,7 @@ class UnslothTrainer:
             else:
                 # Load text model - returns (model, tokenizer)
                 self.model, self.tokenizer = FastLanguageModel.from_pretrained(
-                    model_name = model_name,
+                    model_name = lookup_name,
                     max_seq_length = max_seq_length,
                     dtype = _auto_dtype,
                     load_in_4bit = load_in_4bit,
@@ -838,6 +866,8 @@ class UnslothTrainer:
                     trust_remote_code = trust_remote_code,
                     full_finetuning = full_finetuning,
                     gpu_ids = gpu_ids,
+                    model_load_name = model_load_name,
+                    local_files_only = local_files_only,
                 )
             error_msg = str(e)
             error_lower = error_msg.lower()
@@ -2244,6 +2274,8 @@ class UnslothTrainer:
         dataset_slice_end: Optional[int] = None,
         is_cpt: bool = False,
         s3_config: dict = None,
+        dataset_local_files_only: bool = False,
+        dataset_local_path: Optional[str] = None,
     ) -> Optional[tuple]:
         """
         Load and prepare a dataset for training.
@@ -2263,6 +2295,18 @@ class UnslothTrainer:
             has_separate_eval_source = False  # True if eval comes from a separate HF split
             eval_enabled = eval_steps is not None and eval_steps > 0
             raw_text_mode = is_cpt or format_type == "raw"
+
+            def _selected_cached_files(split_name: Optional[str]) -> list[str]:
+                if not dataset_source or not dataset_local_path:
+                    return []
+                from hub.utils.dataset_cache import cached_dataset_training_files
+
+                return cached_dataset_training_files(
+                    dataset_source,
+                    dataset_local_path,
+                    subset = subset,
+                    train_split = split_name or "train",
+                )
 
             def _raw_mode_label() -> str:
                 return "CPT" if is_cpt else "raw text"
@@ -2395,8 +2439,34 @@ class UnslothTrainer:
                     # train_split already carries a slice expression, so fall back to
                     # the regular download path, which handles HF slice syntax.
                     _split_has_slice = (train_split or "").find("[") != -1
+                    cached_files = (
+                        _selected_cached_files(split_name) if dataset_local_files_only else []
+                    )
+                    dataset = None
+                    if cached_files:
+                        self._update_progress(
+                            status_message = f"Loading cached dataset: {dataset_source}..."
+                        )
+                        loader = self._loader_for_files(cached_files)
+                        try:
+                            dataset = load_dataset(
+                                loader, data_files = cached_files, split = "train"
+                            )
+                            logger.info(
+                                f"Loaded cached dataset files for {dataset_source}: "
+                                f"{len(dataset)} rows\n"
+                            )
+                        except Exception:
+                            self._update_progress(
+                                status_message = (
+                                    f"Cached dataset files unreadable; "
+                                    f"downloading {dataset_source}..."
+                                )
+                            )
+                            dataset = None
                     if (
-                        not _split_has_slice
+                        dataset is None
+                        and not _split_has_slice
                         and dataset_slice_end is not None
                         and dataset_slice_end >= 0
                         and dataset_slice_end >= _slice_start
@@ -2413,7 +2483,7 @@ class UnslothTrainer:
                             f"[dataset-slice] Downloaded {len(dataset)} rows "
                             f"(requested {rows_to_stream})\n"
                         )
-                    else:
+                    elif dataset is None:
                         self._update_progress(
                             status_message = f"Downloading dataset: {dataset_source}..."
                         )
@@ -2480,7 +2550,24 @@ class UnslothTrainer:
                                     f"{STREAMING_EVAL_MAX_SAMPLES} samples\n"
                                 )
                         else:
-                            eval_dataset = load_dataset(**eval_load_kwargs)
+                            cached_eval_files = (
+                                _selected_cached_files(eval_split)
+                                if dataset_local_files_only
+                                else []
+                            )
+                            eval_dataset = None
+                            if cached_eval_files:
+                                eval_loader = self._loader_for_files(cached_eval_files)
+                                try:
+                                    eval_dataset = load_dataset(
+                                        eval_loader,
+                                        data_files = cached_eval_files,
+                                        split = "train",
+                                    )
+                                except Exception:
+                                    eval_dataset = None
+                            if eval_dataset is None:
+                                eval_dataset = load_dataset(**eval_load_kwargs)
 
                         has_separate_eval_source = True
                         if hasattr(eval_dataset, "__len__"):

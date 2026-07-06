@@ -6,13 +6,14 @@ Training history API routes — browse, view, and delete past training runs.
 """
 
 import json
+import shutil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loggers import get_logger
 
 from auth.authentication import get_current_subject
-from core.training.resume import can_resume_run
+from core.training.resume import artifacts_present, can_resume_run
 from models import (
     TrainingRunDeleteResponse,
     TrainingRunDetailResponse,
@@ -22,6 +23,7 @@ from models import (
     TrainingRunUpdateRequest,
 )
 from storage.studio_db import (
+    count_runs_sharing_output_dir,
     delete_run,
     get_run,
     get_run_metrics,
@@ -29,6 +31,7 @@ from storage.studio_db import (
     update_run_display_name,
 )
 from utils.models.checkpoints import has_preview_model, preview_ref
+from utils.paths import outputs_root, resolve_output_dir
 from utils.preview_sharing_settings import get_preview_sharing_enabled
 from utils.preview_token import sign_preview_ref
 
@@ -53,6 +56,76 @@ def _preview_fields(output_dir: Optional[str], sharing_on: bool) -> dict:
     }
 
 
+def _summary_from_row(row: dict, sharing_on: bool) -> TrainingRunSummary:
+    return TrainingRunSummary(
+        **{
+            **{k: v for k, v in row.items() if k != "config_json"},
+            "can_resume": can_resume_run(row),
+            "artifacts_available": artifacts_present(row.get("output_dir")),
+            **_preview_fields(row.get("output_dir"), sharing_on),
+        }
+    )
+
+
+def _delete_run_output_dir(run_id: str, output_dir: str) -> bool:
+    try:
+        resolved = resolve_output_dir(output_dir).resolve()
+        outputs_base = outputs_root().resolve()
+    except (OSError, ValueError):
+        logger.warning(
+            "Cannot resolve output_dir for run %s; skipping disk cleanup: %s",
+            run_id,
+            output_dir,
+        )
+        return False
+
+    if resolved == outputs_base:
+        logger.warning(
+            "Refusing to delete the outputs root itself for run %s: %s", run_id, resolved
+        )
+        return False
+
+    try:
+        resolved.relative_to(outputs_base)
+    except ValueError:
+        logger.warning(
+            "Refusing to delete output_dir outside outputs_root for run %s: %s",
+            run_id,
+            resolved,
+        )
+        return False
+
+    if not resolved.exists():
+        return True
+
+    if not resolved.is_dir():
+        logger.warning("Run %s output path is not a directory; skipping: %s", run_id, resolved)
+        return False
+
+    try:
+        shutil.rmtree(resolved)
+        logger.info("Deleted adapter directory for run %s: %s", run_id, resolved)
+        return True
+    except OSError:
+        logger.exception("Failed to delete adapter directory for run %s: %s", run_id, resolved)
+        return False
+
+
+def _active_training_output_dir() -> Optional[str]:
+    from core.training import get_training_backend
+
+    return get_training_backend().active_output_dir()
+
+
+def _same_output_dir(first: Optional[str], second: Optional[str]) -> bool:
+    if not first or not second:
+        return False
+    try:
+        return resolve_output_dir(first).resolve() == resolve_output_dir(second).resolve()
+    except (OSError, ValueError):
+        return False
+
+
 @router.get("/runs", response_model = TrainingRunListResponse)
 async def list_training_runs(
     limit: int = Query(50, ge = 1, le = 200),
@@ -63,16 +136,7 @@ async def list_training_runs(
     result = list_runs(limit = limit, offset = offset)
     sharing_on = get_preview_sharing_enabled()
     return TrainingRunListResponse(
-        runs = [
-            TrainingRunSummary(
-                **{
-                    **r,
-                    "can_resume": can_resume_run(r),
-                    **_preview_fields(r.get("output_dir"), sharing_on),
-                }
-            )
-            for r in result["runs"]
-        ],
+        runs = [_summary_from_row(r, sharing_on) for r in result["runs"]],
         total = result["total"],
     )
 
@@ -93,13 +157,7 @@ async def get_training_run_detail(run_id: str, current_subject: str = Depends(ge
     metrics_data = get_run_metrics(run_id)
 
     return TrainingRunDetailResponse(
-        run = TrainingRunSummary(
-            **{
-                **{k: v for k, v in run.items() if k != "config_json"},
-                "can_resume": can_resume_run(run),
-                **_preview_fields(run.get("output_dir"), get_preview_sharing_enabled()),
-            }
-        ),
+        run = _summary_from_row(run, get_preview_sharing_enabled()),
         config = config,
         metrics = TrainingRunMetrics(**metrics_data),
     )
@@ -125,26 +183,45 @@ async def update_training_run(
     refreshed = get_run(run_id)
     if refreshed is None:
         raise HTTPException(status_code = 404, detail = f"Run {run_id} not found")
-    return TrainingRunSummary(
-        **{
-            **{k: v for k, v in refreshed.items() if k != "config_json"},
-            "can_resume": can_resume_run(refreshed),
-            **_preview_fields(refreshed.get("output_dir"), get_preview_sharing_enabled()),
-        }
-    )
+    return _summary_from_row(refreshed, get_preview_sharing_enabled())
 
 
 @router.delete("/runs/{run_id}", response_model = TrainingRunDeleteResponse)
-async def delete_training_run(run_id: str, current_subject: str = Depends(get_current_subject)):
+async def delete_training_run(
+    run_id: str,
+    delete_artifacts: bool = Query(False, description = "Also delete the run's output directory on disk"),
+    current_subject: str = Depends(get_current_subject),
+):
     """Delete a training run and its metrics (CASCADE)."""
     run = get_run(run_id)
     if run is None:
         raise HTTPException(status_code = 404, detail = f"Run {run_id} not found")
     if run["status"] == "running":
         raise HTTPException(status_code = 409, detail = "Cannot delete a running training run")
-    logger.info("Deleting training run %s", run_id)
+    logger.info("Deleting training run %s (delete_artifacts=%s)", run_id, delete_artifacts)
+    artifacts_deleted = False
+    artifacts_kept_reason: Optional[str] = None
+    if delete_artifacts:
+        output_dir = run.get("output_dir")
+        if output_dir:
+            if _same_output_dir(output_dir, _active_training_output_dir()):
+                raise HTTPException(
+                    status_code = 409,
+                    detail = (
+                        "Cannot delete artifacts while a training run is writing to this directory"
+                    ),
+                )
+            if count_runs_sharing_output_dir(output_dir, exclude_id = run_id) > 0:
+                artifacts_kept_reason = "shared_output_dir"
+                logger.info(
+                    "Keeping artifacts for run %s; another run shares %s", run_id, output_dir
+                )
+            else:
+                artifacts_deleted = _delete_run_output_dir(run_id, output_dir)
     delete_run(run_id)
     return TrainingRunDeleteResponse(
         status = "deleted",
         message = f"Run {run_id} deleted",
+        artifacts_deleted = artifacts_deleted,
+        artifacts_kept_reason = artifacts_kept_reason,
     )

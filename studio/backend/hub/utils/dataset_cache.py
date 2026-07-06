@@ -5,10 +5,12 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from hub.utils.hf_cache_state import iter_repo_cache_dirs
+from hub.utils.hf_cache_state import iter_repo_cache_dirs, ref_snapshot_dir
 
 
 TRAINING_DATA_EXTS = (".parquet", ".json", ".jsonl", ".csv")
+
+_RESERVED_SPLIT_TOKENS = frozenset({"train", "test", "validation", "valid", "val", "eval"})
 
 
 def _rel_lower(snapshot: Path, path: Path) -> str:
@@ -45,7 +47,7 @@ def _matches_label(snapshot: Path, path: Path, label: str) -> bool:
     tokens = [token for token in re.split(r"[^a-z0-9]+", rel) if token]
     if label in tokens:
         return True
-    if label in {"train", "test", "validation", "valid", "val", "eval"}:
+    if label in _RESERVED_SPLIT_TOKENS:
         return False
     return label in rel
 
@@ -65,6 +67,9 @@ def dataset_snapshot_from_cache_path(local_path: Optional[str], repo_id: str) ->
         snapshots = root / "snapshots" if root.is_dir() else None
         if snapshots is None or not snapshots.is_dir():
             return None
+        pinned = ref_snapshot_dir(root)
+        if pinned is not None:
+            return pinned.resolve()
         candidates = [p for p in snapshots.iterdir() if p.is_dir()]
         if not candidates:
             return None
@@ -90,6 +95,9 @@ def latest_cached_dataset_snapshot(
         snapshots = entry / "snapshots"
         if not snapshots.is_dir():
             continue
+        pinned = ref_snapshot_dir(entry)
+        if pinned is not None:
+            return pinned.resolve()
         try:
             candidates = [s for s in snapshots.iterdir() if s.is_dir()]
         except OSError:
@@ -143,3 +151,43 @@ def cached_dataset_candidates(
         )
 
     return sorted(files, key = score)
+
+
+def cached_dataset_training_files(
+    repo_id: str,
+    local_path: Optional[str],
+    *,
+    subset: Optional[str],
+    train_split: str,
+) -> list[str]:
+    split_lower = (train_split or "").strip().lower()
+    if "[" in split_lower:
+        return []
+    snapshot = latest_cached_dataset_snapshot(repo_id, local_path)
+    if snapshot is None:
+        return []
+    candidates = cached_dataset_candidates(
+        snapshot,
+        subset = subset,
+        train_split = train_split,
+        extensions = TRAINING_DATA_EXTS,
+    )
+    if not candidates:
+        return []
+    suffix = candidates[0].suffix.lower()
+    pool = [path for path in candidates if path.suffix.lower() == suffix]
+    subset_lower = subset.lower() if subset else ""
+    if subset_lower:
+        pool = [path for path in pool if _matches_label(snapshot, path, subset_lower)]
+        if not pool:
+            return []
+    split_matches = [
+        path for path in pool if split_label_matches(_rel_lower(snapshot, path), split_lower)
+    ]
+    if split_matches:
+        return [str(path) for path in split_matches]
+    if any(_label_tokens(_rel_lower(snapshot, path)) & _RESERVED_SPLIT_TOKENS for path in pool):
+        return []
+    if split_lower == "train":
+        return [str(path) for path in pool]
+    return []

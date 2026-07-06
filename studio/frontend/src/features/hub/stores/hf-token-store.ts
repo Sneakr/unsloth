@@ -20,7 +20,7 @@ function loadInitial(): string {
   try {
     const direct = window.localStorage.getItem(HF_TOKEN_KEY);
     if (direct !== null) {
-      const normalized = normalize(direct);
+      const normalized = normalizeHfToken(direct);
       if (normalized !== direct) persist(normalized);
       return normalized;
     }
@@ -32,8 +32,9 @@ function loadInitial(): string {
       };
       const fromTraining = parsed?.state?.hfToken;
       if (typeof fromTraining === "string" && fromTraining.length > 0) {
-        const normalized = normalize(fromTraining);
-        // Copy only: training-config-store reads its own hfToken; deleting the legacy field drops it.
+        const normalized = normalizeHfToken(fromTraining);
+        // Copy only: don't mutate the training-config store's persisted blob —
+        // it clears this legacy hfToken field in its own migration.
         persist(normalized);
         return normalized;
       }
@@ -53,7 +54,7 @@ function persist(value: string): void {
   }
 }
 
-function normalize(raw: string): string {
+export function normalizeHfToken(raw: string): string {
   return raw.replace(/^[\s"']+|[\s"']+$/g, "");
 }
 
@@ -82,7 +83,7 @@ interface HfTokenStore {
 
 export const useHfTokenStore = create<HfTokenStore>((set) => {
   const applyToken = (value: string, shouldPersist: boolean) => {
-    const next = normalize(value);
+    const next = normalizeHfToken(value);
     if (shouldPersist || next !== value) persist(next);
     let changed = false;
     set((state) => {
