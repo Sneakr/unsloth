@@ -48,13 +48,22 @@ def _hidream_te4_fp8_engages(fam: Any, te_quant_mode: Optional[str], target: Any
         return False
 
 
-def hidream_te4_prequant_source(
-    fam: Any, te_quant_mode: Optional[str], target: Any
-) -> Optional["TePrequantSource"]:
-    if fam is None or not _hidream_te4_fp8_engages(fam, te_quant_mode, target):
+def _hidream_te4_prequant_source(fam: Any, fp8_engages: bool) -> Optional["TePrequantSource"]:
+    """The hosted fp8 pre-cast TE4 entry for ``fam``, once the gate is known.
+
+    Split from the wrapper below because ``hidream_te4_kwargs`` needs the gate itself as well
+    as the source it implies, and the gate is one probe rather than two.
+    """
+    if fam is None or not fp8_engages:
         return None
     from .diffusion_te_prequant import resolve_te_prequant_source
     return resolve_te_prequant_source(fam, "text_encoder_4", "fp8")
+
+
+def hidream_te4_prequant_source(
+    fam: Any, te_quant_mode: Optional[str], target: Any
+) -> Optional["TePrequantSource"]:
+    return _hidream_te4_prequant_source(fam, _hidream_te4_fp8_engages(fam, te_quant_mode, target))
 
 
 def hidream_te4_kwargs(
@@ -97,7 +106,11 @@ def hidream_te4_kwargs(
         cache_dir = cache_dir,
     )
 
-    source = hidream_te4_prequant_source(fam, te_quant_mode, target)
+    # The gate answers two questions here -- whether to look for the hosted pre-cast
+    # checkpoint, and whether to cast a dense load below -- so it is probed once and reused.
+    fp8_engages = _hidream_te4_fp8_engages(fam, te_quant_mode, target)
+
+    source = _hidream_te4_prequant_source(fam, fp8_engages)
     if source is not None:
         from .diffusion_te_prequant import load_prequant_text_encoder
         encoder = load_prequant_text_encoder(
