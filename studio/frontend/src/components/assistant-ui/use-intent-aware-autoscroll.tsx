@@ -83,6 +83,7 @@ type AutoScrollContextValue = {
    * inserting commit because this hook owns scrollTop.
    */
   adjustForContentInsertedAbove: (deltaPx: number) => void;
+  notifyContentResized: () => void;
 };
 
 const noopContext: AutoScrollContextValue = {
@@ -99,6 +100,7 @@ const noopContext: AutoScrollContextValue = {
   adjustForContentInsertedAbove: () => {
     /* no viewport mounted */
   },
+  notifyContentResized: () => undefined,
 };
 
 const AutoScrollContext = createContext<AutoScrollContextValue>(noopContext);
@@ -139,10 +141,15 @@ export function useIsThreadAtBottom(): boolean {
 
 export function useIntentAwareAutoScroll(): {
   ref: RefCallback<HTMLElement>;
+  markerRef: RefCallback<HTMLElement>;
   context: AutoScrollContextValue;
 } {
   const aui = useAui();
   const cleanupRef = useRef<(() => void) | null>(null);
+  const markerElRef = useRef<HTMLElement | null>(null);
+  const markerRef = useCallback<RefCallback<HTMLElement>>((node) => {
+    markerElRef.current = node;
+  }, []);
 
   const userDetachedRef = useRef(false);
   const followUntilRef = useRef(0);
@@ -162,6 +169,7 @@ export function useIntentAwareAutoScroll(): {
   const adjustImplRef = useRef<(deltaPx: number) => void>(() => {
     /* no viewport mounted */
   });
+  const tickRequestRef = useRef<() => void>(() => undefined);
 
   const getIsAtBottom = useCallback(() => isAtBottomRef.current, []);
 
@@ -195,6 +203,10 @@ export function useIntentAwareAutoScroll(): {
     adjustImplRef.current(deltaPx);
   }, []);
 
+  const notifyContentResized = useCallback(() => {
+    tickRequestRef.current();
+  }, []);
+
   const attach = useCallback(
     (el: HTMLElement, isRebind: boolean) => {
       let rafId: number | null = null;
@@ -218,6 +230,8 @@ export function useIntentAwareAutoScroll(): {
 
       const atBottomStrict = (): boolean =>
         distanceFromBottom() <= AT_BOTTOM_THRESHOLD_PX;
+
+      const marker = (): HTMLElement => markerElRef.current ?? el;
 
       // Room to scroll upward. Guards wheel/touch detach: a gesture on a viewport with nothing
       // above can't express intent to leave the bottom and must not flip userDetachedRef, else
@@ -309,6 +323,7 @@ export function useIntentAwareAutoScroll(): {
       };
 
       let parked = false;
+      let pendingInitialPin = false;
 
       const detach = (): void => {
         parked = false;
@@ -332,6 +347,7 @@ export function useIntentAwareAutoScroll(): {
         if (ceiling === null || el.scrollHeight - el.clientHeight < ceiling) {
           return false;
         }
+        pendingInitialPin = false;
         el.scrollTo({ top: ceiling, behavior: "instant" });
         detach();
         parked = true;
@@ -343,6 +359,7 @@ export function useIntentAwareAutoScroll(): {
           rafId = requestAnimationFrame(tick);
         }
       };
+      tickRequestRef.current = requestTick;
 
       // A quiet pinned frame stops chaining and hands the rest of the window to this timer, which
       // re-arms itself while the window is open. See SETTLE_CHECK_MS.
@@ -352,6 +369,7 @@ export function useIntentAwareAutoScroll(): {
         }
         const remaining = followUntilRef.current - performance.now();
         if (remaining <= 0) {
+          requestTick();
           return;
         }
         settleTimer = window.setTimeout(
@@ -375,14 +393,22 @@ export function useIntentAwareAutoScroll(): {
         settleCheckDue = false;
         // Park first so a frame without an observer record can't overshoot.
         parkIfHeld();
+        if (pendingInitialPin && el.scrollHeight > el.clientHeight) {
+          pendingInitialPin = false;
+          parked = false;
+          userDetachedRef.current = false;
+          extendFollow();
+        }
         const following =
           !userDetachedRef.current &&
           (settling || performance.now() < followUntilRef.current);
 
         if (following) {
+          marker().toggleAttribute("data-aui-following", true);
+          const scrollHeight = stabilize();
           const pinned = atBottomStrict();
-          if (!pinned && el.scrollHeight > el.clientHeight) {
-            el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
+          if (!pinned && scrollHeight > el.clientHeight) {
+            el.scrollTo({ top: scrollHeight, behavior: "instant" });
           }
           setIsAtBottom(true);
           if (layoutChanged || !pinned) {
@@ -394,6 +420,7 @@ export function useIntentAwareAutoScroll(): {
           return;
         }
 
+        marker().toggleAttribute("data-aui-following", false);
         setIsAtBottom(atBottomStrict());
       };
 
@@ -402,6 +429,7 @@ export function useIntentAwareAutoScroll(): {
         userDetachedRef.current = false;
         followUntilRef.current = performance.now() + FOLLOW_SETTLE_MS;
         if (el.scrollHeight > el.clientHeight) {
+          pendingInitialPin = false;
           el.scrollTo({ top: el.scrollHeight, behavior });
         }
         setIsAtBottom(true);
@@ -457,6 +485,7 @@ export function useIntentAwareAutoScroll(): {
           canScrollUp() &&
           !innerScrollWillConsumeUpward(e.target)
         ) {
+          pendingInitialPin = false;
           detach();
         }
       };
@@ -473,6 +502,7 @@ export function useIntentAwareAutoScroll(): {
           canScrollUp() &&
           !innerScrollWillConsumeUpward(e.target)
         ) {
+          pendingInitialPin = false;
           detach();
         }
       };
@@ -513,6 +543,7 @@ export function useIntentAwareAutoScroll(): {
           if (distanceDelta > 0) {
             upwardAccumulator += distanceDelta;
             if (upwardAccumulator >= UPWARD_DETACH_THRESHOLD_PX) {
+              pendingInitialPin = false;
               detach();
               upwardAccumulator = 0;
             }
@@ -602,8 +633,16 @@ export function useIntentAwareAutoScroll(): {
         requestTick();
       };
 
+      const onMutation = (): void => {
+        layoutChanged = true;
+        if (!parkIfHeld()) {
+          extendFollow();
+        }
+        requestTick();
+      };
+
       const resizeObserver = new ResizeObserver(onLayoutChange);
-      const mutationObserver = new MutationObserver(onLayoutChange);
+      const mutationObserver = new MutationObserver(onMutation);
       const onViewportResize = onLayoutChange;
 
       // Fresh attach always starts pinned. Rebinds to the SAME element must not pin or reset detach
@@ -617,6 +656,8 @@ export function useIntentAwareAutoScroll(): {
         extendFollow();
         if (el.scrollHeight > el.clientHeight) {
           el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
+        } else {
+          pendingInitialPin = true;
         }
         setIsAtBottom(true);
       }
@@ -676,6 +717,7 @@ export function useIntentAwareAutoScroll(): {
           rafId = null;
         }
         clearSettleCheck();
+        marker().removeAttribute("data-aui-following");
         resizeObserver.disconnect();
         mutationObserver.disconnect();
         el.removeEventListener("wheel", onWheel);
@@ -692,6 +734,7 @@ export function useIntentAwareAutoScroll(): {
         adjustImplRef.current = () => {
           /* no viewport mounted */
         };
+        tickRequestRef.current = () => undefined;
       };
     },
     [aui, setIsAtBottom],
@@ -708,7 +751,7 @@ export function useIntentAwareAutoScroll(): {
   useAuiEvent("thread.runStart", () => {
     runStartedHereRef.current = true;
     runEndAtRef.current = Number.NEGATIVE_INFINITY;
-    pinToBottom("auto");
+    pinToBottom("instant");
   });
   useAuiEvent("thread.runEnd", () => {
     runEndAtRef.current = performance.now();
@@ -748,6 +791,7 @@ export function useIntentAwareAutoScroll(): {
       subscribe,
       detachFromBottom,
       adjustForContentInsertedAbove,
+      notifyContentResized,
     }),
     [
       scrollToBottom,
@@ -755,8 +799,9 @@ export function useIntentAwareAutoScroll(): {
       subscribe,
       detachFromBottom,
       adjustForContentInsertedAbove,
+      notifyContentResized,
     ],
   );
 
-  return { ref, context };
+  return { ref, markerRef, context };
 }

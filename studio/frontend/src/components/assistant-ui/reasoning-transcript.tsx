@@ -297,6 +297,8 @@ export function ReasoningTranscript({
   const root = useRef<HTMLDivElement>(null);
   const [index] = useState(() => new ReasoningTranscriptIndex());
   const fragments = useMemo(() => index.update(documents), [documents, index]);
+  const fragmentsRef = useRef(fragments);
+  fragmentsRef.current = fragments;
   const [anchor, setAnchor] = useState(
     () => initialAnchor && resolveReasoningAnchor(fragments, initialAnchor),
   );
@@ -312,6 +314,62 @@ export function ReasoningTranscript({
   const [protectedKeys, setProtectedKeys] = useState<Set<string>>(
     () => new Set(),
   );
+  const geometryRef = useRef(geometry);
+  geometryRef.current = geometry;
+  const [estimateCache] = useState(
+    () =>
+      new WeakMap<
+        ReasoningFragment,
+        { width: number; lineHeight: number; fontPixels: number; size: number }
+      >(),
+  );
+  const getItemKey = useCallback(
+    (i: number) => fragmentsRef.current[i].key,
+    [],
+  );
+  const estimateSize = useCallback(
+    (i: number) => {
+      const fragment = fragmentsRef.current[i];
+      if (fragment.hidden) return 0;
+      const geometry = geometryRef.current;
+      const cached = estimateCache.get(fragment);
+      if (
+        cached &&
+        cached.width === geometry.width &&
+        cached.lineHeight === geometry.lineHeight &&
+        cached.fontPixels === geometry.fontPixels
+      )
+        return cached.size;
+      const code = fragment.code;
+      const columns = Math.max(
+        12,
+        Math.floor(
+          (geometry.width - (code ? 32 : 0)) /
+            (geometry.fontPixels * (code ? 0.58 : 0.48)),
+        ),
+      );
+      const lines = fragment.text
+        .split("\n")
+        .reduce(
+          (sum, line) => sum + Math.max(1, Math.ceil(line.length / columns)),
+          0,
+        );
+      const size = code
+        ? lines * geometry.lineHeight +
+          (fragment.first ? 40 : 0) +
+          (fragment.last ? 16 : 0)
+        : Math.max(1, lines - 2) * geometry.lineHeight +
+          (fragment.first ? 16 : 0);
+      estimateCache.set(fragment, {
+        width: geometry.width,
+        lineHeight: geometry.lineHeight,
+        fontPixels: geometry.fontPixels,
+        size,
+      });
+      return size;
+    },
+    [estimateCache],
+  );
   const adjustAbove = useAdjustForContentInsertedAbove();
   const detach = useDetachThreadFromBottom();
   const viewport = useCallback(
@@ -322,7 +380,7 @@ export function ReasoningTranscript({
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>({
     count: fragments.length,
     getScrollElement: viewport,
-    getItemKey: (i) => fragments[i].key,
+    getItemKey,
     scrollMargin: geometry.top,
     initialOffset: () => viewport()?.scrollTop ?? 0,
     observeElementOffset: (instance, callback) => {
@@ -332,6 +390,7 @@ export function ReasoningTranscript({
       return observeElementOffset(instance, callback);
     },
     overscan: 2,
+    useFlushSync: false,
     measureElement: (element) => {
       if (!element.hasAttribute("data-reasoning-code-row"))
         return element.getBoundingClientRect().height;
@@ -350,30 +409,7 @@ export function ReasoningTranscript({
         : Number.parseFloat(getComputedStyle(surface).marginTop) || 0;
       return Math.max(0, bottom - top + margin);
     },
-    estimateSize: (i) => {
-      const fragment = fragments[i];
-      if (fragment.hidden) return 0;
-      const code = fragment.code;
-      const columns = Math.max(
-        12,
-        Math.floor(
-          (geometry.width - (code ? 32 : 0)) /
-            (geometry.fontPixels * (code ? 0.58 : 0.48)),
-        ),
-      );
-      const lines = fragment.text
-        .split("\n")
-        .reduce(
-          (sum, line) => sum + Math.max(1, Math.ceil(line.length / columns)),
-          0,
-        );
-      return code
-        ? lines * geometry.lineHeight +
-            (fragment.first ? 40 : 0) +
-            (fragment.last ? 16 : 0)
-        : Math.max(1, lines - 2) * geometry.lineHeight +
-            (fragment.first ? 16 : 0);
-    },
+    estimateSize,
     rangeExtractor: (range) => {
       const mounted = new Set(defaultRangeExtractor(range));
       if (anchoring && anchor) mounted.add(anchor.index);
@@ -404,6 +440,7 @@ export function ReasoningTranscript({
     if (!element || !scroll) return;
     let frame = 0;
     let width = 0;
+    let capturedAt = 0;
     let readingAnchor: (ReasoningReadingAnchor & { index: number }) | undefined;
     const measure = () => {
       frame = 0;
@@ -432,7 +469,8 @@ export function ReasoningTranscript({
           setAnchoring(true);
         }
         virtualizer.measure();
-      } else {
+      } else if (performance.now() - capturedAt >= 200) {
+        capturedAt = performance.now();
         readingAnchor = undefined;
         for (const row of element.querySelectorAll<HTMLElement>(
           "[data-index]",

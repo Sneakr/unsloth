@@ -1567,10 +1567,7 @@ test("toasts clear the bar while it is open", () => {
   assert.match(FIND_BAR, FIND_SURFACE_GEOMETRY);
   assert.match(FIND_IN_PAGE, FIND_SURFACE_GEOMETRY);
   const toaster = '[data-sonner-toaster][data-y-position="top"]';
-  const rule = cssRule(
-    INDEX,
-    `:root:has([data-find-bar-layer]:not([hidden]) .find-bar-surface) ${toaster}`,
-  );
+  const rule = cssRule(INDEX, `html[data-find-bar-open] ${toaster}`);
   assert.match(rule, TOAST_UNDER_FIND_BAR);
   // The toaster renders outside the chrome wrapper, so the bar's inset has to reach <html>.
   assert.match(

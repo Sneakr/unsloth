@@ -77,6 +77,7 @@ import {
   FenceBody,
   type FenceTokens,
   fenceMode,
+  noteStreamingFence,
   trimmedLength,
   trimTrailingNewlines,
   useFenceReached,
@@ -169,6 +170,19 @@ const { withSmoothContextProvider } = INTERNAL;
 // Streamdown 2.5 schedules ordinary streaming blocks in an interruptible React transition, and a continuous token
 // stream can starve that transition for seconds. Its animated path commits every block update directly.
 // StreamdownBlock removes the animation transformer while retaining this direct scheduling path.
+const STREAMING_RENDER_DUTY = 3;
+const STREAMING_INPUT_YIELDS = 3;
+
+type InputPendingNavigator = Navigator & {
+  scheduling?: {
+    isInputPending?: (options?: { includeContinuous?: boolean }) => boolean;
+  };
+};
+
+const inputPending = (): boolean =>
+  (navigator as InputPendingNavigator).scheduling?.isInputPending?.() ??
+  false;
+
 const STREAMDOWN_IMMEDIATE_UPDATES = {
   duration: 0,
   stagger: 0,
@@ -885,8 +899,29 @@ function useFenceTokens(
   languageToken: string | null,
   enabled: boolean,
 ): FenceTokens | null {
-  const [tokens, setTokens] = useState<FenceTokens | null>(null);
+  const highlight = useCallback(
+    (body: string, late: (result: FenceTokens) => void) =>
+      code.highlight(
+        {
+          code: body,
+          language: (languageToken ?? "text") as never,
+          themes: STREAMDOWN_SHIKI_THEME,
+        },
+        late,
+      ),
+    [languageToken],
+  );
+  const [seed] = useState<{ body: string; tokens: FenceTokens } | null>(() => {
+    if (!enabled) return null;
+    const body = trimTrailingNewlines(source);
+    const settled = highlight(body, () => {});
+    return settled ? { body, tokens: settled } : null;
+  });
+  const [tokens, setTokens] = useState<FenceTokens | null>(
+    seed?.tokens ?? null,
+  );
   const wanted = useRef("");
+  const seedConsumed = useRef(false);
   /*
    * ONE effect, and a layout one. This was two -- a passive effect for the result and the
    * callback, plus a layout effect so an already-cached fence is coloured before its first paint.
@@ -900,22 +935,21 @@ function useFenceTokens(
     if (!enabled) return;
     const body = trimTrailingNewlines(source);
     wanted.current = body;
-    const settled = code.highlight(
-      {
-        code: body,
-        language: (languageToken ?? "text") as never,
-        themes: STREAMDOWN_SHIKI_THEME,
-      },
-      (late) => {
-        if (wanted.current === body) setTokens(late);
-      },
-    );
+    if (!seedConsumed.current) {
+      seedConsumed.current = true;
+      if (seed?.body === body) return;
+    }
+    const settled = highlight(body, (late) => {
+      if (wanted.current === body) setTokens(late);
+    });
     // `settled === null` means the plugin caught a tokenization error; keeping the previous
     // tokens would show an older, shorter body. The callback restores them if it succeeds later.
     setTokens(settled ?? null);
-  }, [enabled, source, languageToken]);
+  }, [enabled, source, highlight, seed]);
   return tokens;
 }
+
+const STREAMING_WINDOW_CAP_LINES = 240;
 
 /**
  * A fence that is still being written.
@@ -935,6 +969,7 @@ function StreamingFenceBlock({
   isIncomplete?: boolean;
 }) {
   const languageToken = language?.trim().split(/\s+/)[0] || null;
+  if (isIncomplete) noteStreamingFence(languageToken, source);
   const tokens = useFenceTokens(source, languageToken, true);
   return (
     <MarkdownRendererBoundary
@@ -945,7 +980,8 @@ function StreamingFenceBlock({
         language={languageToken}
         result={tokens}
         source={source}
-        windowing={fenceMode() === "window"}
+        windowing={isIncomplete || fenceMode() === "window"}
+        windowCap={isIncomplete ? STREAMING_WINDOW_CAP_LINES : undefined}
       />
     </MarkdownRendererBoundary>
   );
@@ -1012,6 +1048,7 @@ function FenceBlock({
     Boolean(isIncomplete),
     languageToken,
     trimmedLength(source),
+    source,
     warm,
   );
 
@@ -1097,6 +1134,11 @@ function useCoalescedStreamingText(
   const [displayed, setDisplayed] = useState({ messageId, text });
   const pendingRef = useRef({ messageId, text });
   const rafRef = useRef<number | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const startedAtRef = useRef(0);
+  const measureFromRef = useRef<number | null>(null);
+  const costRef = useRef(0);
+  const yieldsRef = useRef(0);
   const activeMessageIdRef = useRef(messageId);
 
   const cancelScheduledRender = useCallback(() => {
@@ -1104,7 +1146,20 @@ function useCoalescedStreamingText(
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
   }, []);
+
+  useLayoutEffect(() => {
+    const from = measureFromRef.current;
+    if (from === null) return;
+    measureFromRef.current = null;
+    requestAnimationFrame((frameTime) => {
+      costRef.current = Math.max(0, frameTime - from);
+    });
+  }, [displayed]);
 
   useEffect(() => {
     pendingRef.current = { messageId, text };
@@ -1117,14 +1172,35 @@ function useCoalescedStreamingText(
       return;
     }
 
-    if (rafRef.current !== null) {
+    if (rafRef.current !== null || timerRef.current !== null) {
       return;
     }
 
-    rafRef.current = requestAnimationFrame(() => {
+    const render = () => {
       rafRef.current = null;
+      if (yieldsRef.current < STREAMING_INPUT_YIELDS && inputPending()) {
+        yieldsRef.current += 1;
+        rafRef.current = requestAnimationFrame(render);
+        return;
+      }
+      yieldsRef.current = 0;
+      const now = performance.now();
+      startedAtRef.current = now;
+      measureFromRef.current = now;
       setDisplayed(pendingRef.current);
-    });
+    };
+    const wait =
+      startedAtRef.current +
+      Math.max(16, STREAMING_RENDER_DUTY * costRef.current) -
+      performance.now();
+    if (wait > 1) {
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        rafRef.current = requestAnimationFrame(render);
+      }, wait);
+    } else {
+      rafRef.current = requestAnimationFrame(render);
+    }
   }, [cancelScheduledRender, messageId, text, isStreaming]);
 
   useEffect(() => {
@@ -1308,7 +1384,8 @@ const MarkdownTextImpl = () => {
       : "",
   );
   const messageTextKey = useAuiState(({ message }) =>
-    allowSearchImages
+    allowSearchImages &&
+    !("status" in message && message.status?.type === "running")
       ? JSON.stringify(
           message.parts
             .filter((part) => part.type === "text")

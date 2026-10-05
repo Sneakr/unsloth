@@ -5149,9 +5149,14 @@ html.force-reduced-motion .sidebar-section-drop-line {
    Windows scrollbar draws arrows. :hover too, or the reveal rules flip it back; the width
    stays overridable so !important and inline hides still win. */
 @supports selector(::-webkit-scrollbar) {
-	:root.client-windows *,
-	:root.client-windows *:hover {
+	:root.client-windows * {
 		scrollbar-width: auto;
+		scrollbar-color: auto !important;
+	}
+
+	:root.client-windows .sidebar-scroll-fade:hover,
+	:root.client-windows .run-settings-scroll:hover,
+	:root.client-windows .hover-scrollbar:hover {
 		scrollbar-color: auto !important;
 	}
 
@@ -5164,15 +5169,6 @@ html.force-reduced-motion .sidebar-section-drop-line {
 	:root.client-windows .no-scrollbar::-webkit-scrollbar {
 		display: block;
 	}
-
-	:root.client-windows {
-		--thread-scrollbar-gutter: 8px;
-	}
-}
-
-/* Start the classic scrollbar below the chat header, which overlays the thread. */
-:root.client-windows .aui-thread-viewport::-webkit-scrollbar-track {
-	margin-top: var(--thread-header-offset, 0px);
 }
 
 /* Run settings: always reserve the scrollbar gutter so the header close
@@ -5200,6 +5196,26 @@ html.force-reduced-motion .sidebar-section-drop-line {
 	scrollbar-gutter: stable both-edges;
 }
 
+.aui-thread-host[data-aui-following] + .aui-thread-root .aui-thread-viewport {
+	overflow-anchor: none;
+}
+
+@supports selector(::-webkit-scrollbar) {
+	:root.client-windows .aui-thread-viewport {
+		scrollbar-width: thin;
+		scrollbar-color: transparent transparent !important;
+	}
+
+	:root.client-windows .aui-thread-viewport:hover {
+		scrollbar-color: oklch(0.5 0 0 / 0.4) transparent !important;
+	}
+
+	.dark:root.client-windows .aui-thread-viewport:hover,
+	:root.client-windows .dark .aui-thread-viewport:hover {
+		scrollbar-color: oklch(0.72 0 0 / 0.4) transparent !important;
+	}
+}
+
 /* An unregistered custom property always inherits, so writing
    --aui-scroll-stabilizer on the scroll container dirties inherited style for
    every descendant and the next scrollHeight read restyles the whole thread.
@@ -5219,6 +5235,12 @@ html.force-reduced-motion .sidebar-section-drop-line {
    Engines without @property (Firefox below 128) ignore this block and keep the
    inherited behaviour: slower, still correct. */
 @property --aui-scroll-stabilizer {
+	syntax: "<length>";
+	inherits: false;
+	initial-value: 0px;
+}
+
+@property --removed-body-scroll-bar-size {
 	syntax: "<length>";
 	inherits: false;
 	initial-value: 0px;
@@ -5696,15 +5718,15 @@ html.force-reduced-motion .sidebar-section-drop-line {
 	top: calc(var(--studio-content-top-inset, 0px) + 3.5rem);
 }
 
-/* Nothing notifies JS when these mount, so CSS keeps the portaled bars under them. */
-html:has([aria-modal="true"], [data-blocking-screen]) [data-find-bar-layer],
-html:has([data-blocking-screen]) .interface-zoom-position {
+/* The blocking screens flag <html> while mounted, so CSS keeps the portaled bars under them. */
+html[data-blocking-screen-open] [data-find-bar-layer],
+html[data-blocking-screen-open] .interface-zoom-position {
 	display: none;
 }
 
 /* Toasts stack under the open find bar: its top, its h-13, then 8px. Not the zoom popup, which
    shares the surface class. */
-:root:has([data-find-bar-layer]:not([hidden]) .find-bar-surface) [data-sonner-toaster][data-y-position="top"] {
+html[data-find-bar-open] [data-sonner-toaster][data-y-position="top"] {
 	--offset-top: calc(var(--studio-content-top-inset, 0px) + 3.5rem + 3.25rem * var(--ui-space-scale, 1) + 0.5rem) !important;
 	--mobile-offset-top: calc(var(--studio-content-top-inset, 0px) + 3.5rem + 3.25rem * var(--ui-space-scale, 1) + 0.5rem) !important;
 }

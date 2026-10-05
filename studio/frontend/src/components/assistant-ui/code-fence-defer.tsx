@@ -458,15 +458,54 @@ const inBand = (node: HTMLElement, scroller: HTMLElement | null): boolean => {
  *                 alone. Held in a ref, not an effect dependency, so an unmemoized caller cannot
  *                 rebuild every observer in the thread on every render.
  */
+const FENCE_HEAD_CHARS = 64;
+const JUST_STREAMED_MS = 2000;
+
+let lastStreamingFence: {
+  language: string | null;
+  head: string;
+  chars: number;
+  at: number;
+} | null = null;
+
+export const noteStreamingFence = (
+  language: string | null,
+  source: string,
+): void => {
+  lastStreamingFence = {
+    language,
+    head: source.slice(0, FENCE_HEAD_CHARS),
+    chars: trimmedLength(source),
+    at: performance.now(),
+  };
+};
+
+const justStreamed = (
+  language: string | null,
+  head: string,
+  chars: number,
+): boolean =>
+  lastStreamingFence !== null &&
+  lastStreamingFence.language === language &&
+  lastStreamingFence.head === head &&
+  chars >= lastStreamingFence.chars &&
+  chars - lastStreamingFence.chars < 512 &&
+  performance.now() - lastStreamingFence.at < JUST_STREAMED_MS;
+
 export function useFenceReached(
   host: RefObject<HTMLElement | null>,
   enabled: boolean,
   streaming: boolean,
   language: string | null,
   chars: number,
+  source: string,
   warm: (tokens: boolean) => void,
 ): boolean {
-  const [latched, setLatched] = useState(false);
+  const [latched, setLatched] = useState(
+    () =>
+      streaming ||
+      justStreamed(language, source.slice(0, FENCE_HEAD_CHARS), chars),
+  );
   // Bumped when the resolved scrolling ancestor stops being one, which rebuilds the gates below
   // against the element that clips this fence now. Never read for anything else.
   const [generation, setGeneration] = useState(0);
@@ -822,6 +861,7 @@ function useLineWindow(
   frame: RefObject<HTMLElement | null>,
   lineCount: number,
   enabled: boolean,
+  cap: number = WINDOW_CAP_LINES,
 ): LineWindow | null {
   const [lineWindow, setLineWindow] = useState<LineWindow | null>(null);
   // The rendered window, read by `measure` without making it an effect dependency: the effect
@@ -838,7 +878,7 @@ function useLineWindow(
     if (!node || !outer) return;
     // Under the cap a window can never apply, so no layout read is needed. A streaming fence that
     // grows past the cap re-registers through the ResizeObserver.
-    if (lines.current <= WINDOW_CAP_LINES && current.current === null) return;
+    if (lines.current <= cap && current.current === null) return;
     // See `setPrinting`: the whole document is on the page, so the whole fence is coloured.
     if (printing) {
       if (current.current === null) return;
@@ -860,6 +900,7 @@ function useLineWindow(
       viewportTop: bounds ? bounds.top : 0,
       viewportHeight: bounds ? bounds.height : window.innerHeight,
       previous: current.current,
+      cap,
     });
     // `selectLineWindow` hands the previous object straight back when nothing moved, so this is an
     // identity check and an ordinary scroll costs no render at all.
@@ -938,6 +979,7 @@ export const FenceBody = memo(function FenceBody({
   result,
   source,
   windowing,
+  windowCap,
 }: {
   /** Streamdown's unclosed-fence flag, reproduced as `data-incomplete` on the wrapper. */
   isIncomplete: boolean | undefined;
@@ -946,11 +988,18 @@ export const FenceBody = memo(function FenceBody({
   source: string;
   /** False keeps every line highlighted however long the fence is, which is what main does. */
   windowing: boolean;
+  windowCap?: number;
 }) {
   const code = useRef<HTMLElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const tokens = result?.tokens ?? null;
-  const lineWindow = useLineWindow(code, frame, tokens?.length ?? 0, windowing);
+  const lineWindow = useLineWindow(
+    code,
+    frame,
+    tokens?.length ?? 0,
+    windowing,
+    windowCap,
+  );
   const languageClass = language === null ? null : `language-${language}`;
 
   const rootStyle = useMemo(() => {

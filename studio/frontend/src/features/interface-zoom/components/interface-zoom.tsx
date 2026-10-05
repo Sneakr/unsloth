@@ -213,10 +213,34 @@ export function InterfaceZoom() {
       const direction = wheelStep(event, getAppliedInterfaceZoom());
       if (direction !== null) zoomInterface(direction);
     };
-    window.addEventListener("wheel", onWheel, { passive: false });
+    let wheelArmed = false;
+    const armWheel = () => {
+      if (wheelArmed) return;
+      wheelArmed = true;
+      window.addEventListener("wheel", onWheel, { passive: false });
+    };
+    const disarmWheel = () => {
+      if (!wheelArmed) return;
+      wheelArmed = false;
+      window.removeEventListener("wheel", onWheel);
+    };
+    const onModifierChange = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) armWheel();
+      else disarmWheel();
+    };
+    if (mac) {
+      armWheel();
+    } else {
+      window.addEventListener("keydown", onModifierChange, true);
+      window.addEventListener("keyup", onModifierChange, true);
+      window.addEventListener("blur", disarmWheel);
+    }
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onModifierChange, true);
+      window.removeEventListener("keyup", onModifierChange, true);
+      window.removeEventListener("blur", disarmWheel);
+      disarmWheel();
     };
   }, []);
 

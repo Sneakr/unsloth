@@ -245,7 +245,7 @@ test("the zoom popup takes the find bar's corner", () => {
   // Under the startup and closing screens, like the find bar.
   assert.match(
     css,
-    /html:has\(\[aria-modal="true"\], \[data-blocking-screen\]\) \[data-find-bar-layer\],\s*html:has\(\[data-blocking-screen\]\) \.interface-zoom-position \{\s*display: none;/,
+    /html\[data-blocking-screen-open\] \[data-find-bar-layer\],\s*html\[data-blocking-screen-open\] \.interface-zoom-position \{\s*display: none;/,
   );
   assert.match(provider, /data-blocking-screen=""\s*className="fixed inset-0 z-40 bg-background"/);
   assert.match(

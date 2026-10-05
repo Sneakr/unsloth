@@ -9,7 +9,9 @@ import { math } from "micromark-extension-math";
 import remend from "remend";
 import type { Definition, RootContent } from "mdast";
 import { markdownBlockFallback } from "./markdown-block-fallback.ts";
+import { ownString } from "./own-string.ts";
 import { ReasoningCodeIndex } from "./reasoning-code-index.ts";
+import { hasPrefix } from "./streaming-render-schedule.ts";
 
 export const REASONING_TRANSCRIPT_THRESHOLD = 16_384;
 export const REASONING_FRAGMENT_CHARACTERS = 8_192;
@@ -312,7 +314,7 @@ class DocumentIndex {
 
   update(source: string): void {
     if (source === this.source) return;
-    if (!source.startsWith(this.source)) {
+    if (!hasPrefix(source, this.source)) {
       this.committed = [];
       this.offset = 0;
       this.fence = null;
@@ -359,6 +361,7 @@ class DocumentIndex {
           pending.push(block);
           break;
         }
+        block.text = ownString(block.text);
         this.committed.push(block);
         this.offset = end;
         this.fence = null;
@@ -398,7 +401,7 @@ class DocumentIndex {
           this.committed.push({
             start: this.offset,
             end: this.offset + lastStart,
-            text: tail.slice(0, lastStart),
+            text: ownString(tail.slice(0, lastStart)),
             continued: this.continued,
             prefix: this.prefix,
             listContinuationDepth: this.listContinuationDepth,
@@ -420,7 +423,7 @@ class DocumentIndex {
           this.committed.push({
             start: this.offset + start,
             end: this.offset + stop,
-            text: tail.slice(start, stop),
+            text: ownString(tail.slice(start, stop)),
             continued: n === 0 && this.continued,
             prefix: n === 0 ? this.prefix : "",
             listContinuationDepth: n === 0 ? this.listContinuationDepth : 0,
@@ -445,7 +448,7 @@ class DocumentIndex {
         this.committed.push({
           start: this.offset,
           end: this.offset + cut,
-          text: tail.slice(0, cut),
+          text: ownString(tail.slice(0, cut)),
           continued: this.continued,
           prefix: this.prefix,
           listContinuationDepth: this.listContinuationDepth,

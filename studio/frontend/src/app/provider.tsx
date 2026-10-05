@@ -48,6 +48,7 @@ import { useTauriUpdate } from "@/hooks/use-tauri-update";
 import { useUiSpaceScale } from "@/hooks/use-ui-space-scale";
 import { isTauri } from "@/lib/api-base";
 import { followDesktopUpdateScreen } from "@/lib/desktop-update-activity";
+import { useDocumentFlag } from "@/lib/document-flag";
 import { refreshWindowChromeTop } from "@/lib/window-chrome";
 import {
   CHAT_SETTINGS_INSET_VAR,
@@ -115,6 +116,11 @@ const STACK_CARD_INSET_RIGHT = 16;
 const STACK_CARD_INSET_RIGHT_PAST_PANEL = `calc(${STACK_CARD_INSET_RIGHT}px + var(${CHAT_SETTINGS_INSET_VAR}, 0px))`;
 
 // macos page zoom does not change dpr; windows already includes zoom in its dpr.
+function BlockingScreenFlag() {
+  useDocumentFlag("data-blocking-screen-open", true);
+  return null;
+}
+
 function logicalPerCssPx(monitorScale: number): number {
   const zoom = Math.max(1, getAppliedInterfaceZoom());
   if (typeof window === "undefined" || !(monitorScale > 0)) return zoom;
@@ -954,6 +960,7 @@ function TauriWrapper({ children }: { children: ReactNode }) {
           data-blocking-screen=""
           className="fixed inset-0 z-40 bg-background"
         >
+          <BlockingScreenFlag />
           <StartupScreen
             status={startupStatus}
             logs={logs}

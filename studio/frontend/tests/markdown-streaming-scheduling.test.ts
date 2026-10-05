@@ -118,7 +118,7 @@ test("token updates keep Streamdown's expensive configuration props stable", () 
   }
 });
 
-test("stream updates are paint-coalesced without a time or length throttle", () => {
+test("stream updates are paint-coalesced with a cost-aware cadence and no length throttle", () => {
   const markdownSource = source.getText();
   const hookStart = markdownSource.indexOf(
     "function useCoalescedStreamingText",
@@ -128,7 +128,8 @@ test("stream updates are paint-coalesced without a time or length throttle", () 
   const hook = markdownSource.slice(hookStart, hookEnd);
 
   assert.ok(hook.includes("requestAnimationFrame"));
-  assert.ok(!hook.includes("setTimeout"));
+  assert.ok(hook.includes("Math.max(16, STREAMING_RENDER_DUTY * costRef.current)"));
+  assert.equal(hook.split("setTimeout(").length - 1, 1);
 
   // A running message can be replaced rather than appended to, as the audio
   // path does when it swaps its placeholder for the player, so holding the last

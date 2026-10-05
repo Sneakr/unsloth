@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import { createPortal } from "react-dom";
 import {
   ComposerAttachments,
   UserMessageAttachments,
@@ -1930,8 +1931,11 @@ export const Thread: FC<{
   // Intent-aware autoscroll replaces assistant-ui's built-in autoscroll to
   // prevent the streaming-mutation race that snaps the viewport back to the
   // bottom while the user scrolls up (see the hook for the full explanation).
-  const { ref: viewportRef, context: autoScrollContext } =
-    useIntentAwareAutoScroll();
+  const {
+    ref: viewportRef,
+    markerRef,
+    context: autoScrollContext,
+  } = useIntentAwareAutoScroll();
 
   const isComposerAttachPending = useAuiState(({ threads }) =>
     targetThreadId ? threads.mainThreadId !== targetThreadId : false,
@@ -1956,7 +1960,14 @@ export const Thread: FC<{
   // Viewport element is owned by the autoscroll hook; mirror it locally for
   // the spacer clamp math. State, not a ref: the keyed provider remounts the
   // viewport on thread switches and the scroll listener must re-attach.
-  const [viewportEl, setViewportEl] = useState<HTMLElement | null>(null);
+  const [viewportSlot, setViewportSlot] = useState<{
+    el: HTMLElement;
+    threadId: string;
+  } | null>(null);
+  const viewportEl =
+    viewportSlot !== null && viewportSlot.threadId === runtimeThreadId
+      ? viewportSlot.el
+      : null;
   // Same element in an identity-stable ref, so ProgressiveMessages can read the viewport without a
   // prop that would rebuild its row array on thread switch. A ref rather than a document-wide query
   // because the Compare panes each mount their own Thread.
@@ -1964,10 +1975,10 @@ export const Thread: FC<{
   const composedViewportRef = useCallback(
     (node: HTMLElement | null) => {
       viewportElRef.current = node;
-      setViewportEl(node);
+      setViewportSlot(node ? { el: node, threadId: runtimeThreadId } : null);
       viewportRef(node);
     },
-    [viewportRef],
+    [viewportRef, runtimeThreadId],
   );
 
   // Copying a selection out of the thread writes the plain text itself rather than letting the
@@ -2033,6 +2044,7 @@ export const Thread: FC<{
       desiredSpacerPxRef.current = null;
       appliedSpacerPxRef.current = null;
       spacerElRef.current?.style.removeProperty("height");
+      autoScrollContext.notifyContentResized();
       return;
     }
     const desired = composerHeight + COMPOSER_SCROLL_GAP_PX;
@@ -2068,6 +2080,7 @@ export const Thread: FC<{
         autoScrollContext.detachFromBottom();
       }
     }
+    autoScrollContext.notifyContentResized();
   }, [composerHeight, hideComposer, autoScrollContext, aui, applySpacerPx, viewportEl]);
 
   // Drop deferred spacer excess once the user has scrolled far enough above
@@ -2150,6 +2163,82 @@ export const Thread: FC<{
   return (
     <GeneratedImageOverlayProvider key={runtimeThreadId} threadId={threadId}>
       <PageDragContext.Provider value={pageDragging}>
+      <IntentAwareScrollProvider value={autoScrollContext}>
+        <ThreadPrimitive.Viewport
+          autoScroll={false}
+          scrollToBottomOnRunStart={false}
+          scrollToBottomOnInitialize={false}
+          scrollToBottomOnThreadSwitch={false}
+          ref={markerRef}
+          className="aui-thread-host hidden"
+          aria-hidden={true}
+        >
+          {viewportEl !== null &&
+            createPortal(
+              <>
+          {!hideWelcome && (
+            <AuiIf
+              condition={({ thread }) => thread.isEmpty && !thread.isLoading}
+            >
+              <ThreadWelcome hideComposer={hideComposer} threadId={threadId} />
+            </AuiIf>
+          )}
+
+          {/* Drop-in for ThreadPrimitive.Messages that bounds a long thread's first commit to
+          the tail and mounts the rest over the following frames. Nothing unmounts and the
+          document converges to the tree this rendered before; consumers that cannot wait call
+          completeProgressiveMounts. It takes the propless slot #9042 introduced, for the same
+          reason: React's bail-out needs one shared element per row. See
+          progressive-mount-controller.ts. */}
+          <ProgressiveMessages
+            renderMessage={renderThreadMessage}
+            resetKey={runtimeThreadId}
+            viewportRef={viewportElRef}
+          />
+
+          {/* Bottom slack so the last message has room above the sticky
+          scroll-to-bottom button (and floating composer in single mode),
+          instead of butting against the footer. */}
+          <AuiIf condition={({ thread }) => hideWelcome || !thread.isEmpty}>
+            <div
+              ref={spacerRef}
+              className={cn(
+                "shrink-0",
+                hideComposer
+                  ? "h-16"
+                  : composerHeight == null
+                    ? "h-40"
+                    : undefined,
+              )}
+              aria-hidden={true}
+            />
+          </AuiIf>
+
+          <AuiIf condition={({ thread }) => hideWelcome || !thread.isEmpty}>
+            <ThreadPrimitive.ViewportFooter
+              className={cn(
+                "aui-thread-viewport-footer pointer-events-none sticky z-20 flex w-full justify-center bg-transparent",
+                // 150px (was 140px) to add a small gap above the composer
+                hideComposer
+                  ? "bottom-3"
+                  : footerBottomPx == null
+                    ? "bottom-[calc(150px*var(--ui-space-scale,1))]"
+                    : undefined,
+              )}
+              style={
+                !hideComposer && footerBottomPx != null
+                  ? { bottom: footerBottomPx }
+                  : undefined
+              }
+            >
+              <ThreadScrollToBottom />
+            </ThreadPrimitive.ViewportFooter>
+          </AuiIf>
+              </>,
+              viewportEl,
+            )}
+        </ThreadPrimitive.Viewport>
+      </IntentAwareScrollProvider>
       <ThreadPrimitive.Root
         className="aui-root aui-thread-root @container relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden"
         style={{
@@ -2163,12 +2252,8 @@ export const Thread: FC<{
         onDrop={onDrop}
       >
         <IntentAwareScrollProvider value={autoScrollContext}>
-          <ThreadPrimitive.Viewport
+          <div
             ref={composedViewportRef}
-            autoScroll={false}
-            scrollToBottomOnRunStart={false}
-            scrollToBottomOnInitialize={false}
-            scrollToBottomOnThreadSwitch={false}
             className={cn(
               "aui-thread-viewport aui-stream-viewport relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-x-auto overflow-y-auto scroll-smooth px-5",
               hideComposer
@@ -2178,67 +2263,7 @@ export const Thread: FC<{
                   // so every other surface keeps the padding it had.
                   "[--thread-header-offset:calc(var(--studio-content-top-inset,0px)+var(--studio-chat-header-height,48px)+var(--studio-chat-notice-height,0px))] pt-[var(--thread-header-offset)]",
             )}
-          >
-            {!hideWelcome && (
-              <AuiIf
-                condition={({ thread }) => thread.isEmpty && !thread.isLoading}
-              >
-                <ThreadWelcome hideComposer={hideComposer} threadId={threadId} />
-              </AuiIf>
-            )}
-
-            {/* Drop-in for ThreadPrimitive.Messages that bounds a long thread's first commit to
-            the tail and mounts the rest over the following frames. Nothing unmounts and the
-            document converges to the tree this rendered before; consumers that cannot wait call
-            completeProgressiveMounts. It takes the propless slot #9042 introduced, for the same
-            reason: React's bail-out needs one shared element per row. See
-            progressive-mount-controller.ts. */}
-            <ProgressiveMessages
-              renderMessage={renderThreadMessage}
-              resetKey={runtimeThreadId}
-              viewportRef={viewportElRef}
-            />
-
-            {/* Bottom slack so the last message has room above the sticky
-            scroll-to-bottom button (and floating composer in single mode),
-            instead of butting against the footer. */}
-            <AuiIf condition={({ thread }) => hideWelcome || !thread.isEmpty}>
-              <div
-                ref={spacerRef}
-                className={cn(
-                  "shrink-0",
-                  hideComposer
-                    ? "h-16"
-                    : composerHeight == null
-                      ? "h-40"
-                      : undefined,
-                )}
-                aria-hidden={true}
-              />
-            </AuiIf>
-
-            <AuiIf condition={({ thread }) => hideWelcome || !thread.isEmpty}>
-              <ThreadPrimitive.ViewportFooter
-                className={cn(
-                  "aui-thread-viewport-footer pointer-events-none sticky z-20 flex w-full justify-center bg-transparent",
-                  // 150px (was 140px) to add a small gap above the composer
-                  hideComposer
-                    ? "bottom-3"
-                    : footerBottomPx == null
-                      ? "bottom-[calc(150px*var(--ui-space-scale,1))]"
-                      : undefined,
-                )}
-                style={
-                  !hideComposer && footerBottomPx != null
-                    ? { bottom: footerBottomPx }
-                    : undefined
-                }
-              >
-                <ThreadScrollToBottom />
-              </ThreadPrimitive.ViewportFooter>
-            </AuiIf>
-          </ThreadPrimitive.Viewport>
-
+          />
           <GeneratedImageViewportOverlay
             hideComposer={hideComposer}
             bottomOffsetPx={footerBottomPx}
@@ -7491,13 +7516,17 @@ function useContinuation() {
   const partial = useAuiState(
     ({ message }) => readContinuationSource(message.content).partial,
   );
-  const reasoning = useAuiState(
-    ({ message }) => readContinuationSource(message.content).reasoning,
+  const reasoning = useAuiState(({ message }) =>
+    "status" in message && message.status?.type === "running"
+      ? ""
+      : readContinuationSource(message.content).reasoning,
   );
   // A tool-calling turn cannot be resumed: the continuation runs as a sibling, so the
   // call and its result would be missing from the outbound history.
   const continuable = useAuiState(({ message }) =>
-    isContinuableContent(message.content, { thought: thoughtResumable }),
+    "status" in message && message.status?.type === "running"
+      ? false
+      : isContinuableContent(message.content, { thought: thoughtResumable }),
   );
   // Gemini signs its text parts, and the resumed turn is replayed from this branch,
   // so the signature travels with the partial.
@@ -7866,7 +7895,11 @@ const AssistantMessage: FC = () => {
   const aui = useAui();
   const focusReveal = useActionBarFocusReveal();
   const messageId = useAuiState(({ message }) => message.id);
-  const messageContent = useAuiState(({ message }) => message.content);
+  const messageContent = useAuiState(({ message }) =>
+    "status" in message && message.status?.type === "running"
+      ? null
+      : message.content,
+  );
   const metadataResearchRunId = useAuiState(({ message }) =>
     getResearchRunId(message.metadata),
   );
@@ -8000,7 +8033,7 @@ const AssistantMessage: FC = () => {
             <div className="overflow-hidden rounded-xl border-[0.5px] border-border bg-muted focus-within:border-ring">
               <textarea
                 ref={textareaRef}
-                defaultValue={extractTaggedText(messageContent)}
+                defaultValue={extractTaggedText(messageContent ?? [])}
                 className="block w-full p-3 bg-transparent text-foreground outline-none overflow-y-auto resize-none font-mono text-sm max-h-[70dvh]"
                 autoFocus
                 onInput={adjustHeight}
