@@ -11,8 +11,11 @@ async (page) => {
   await page.waitForTimeout(600);
   check(await page.locator('[data-slot="reasoning-transcript"]').count() === 1, "long reasoning is not windowed");
   check(await page.locator('[data-slot="reasoning-page-navigation"], [data-slot="reasoning-oversized-code"]').count() === 0, "pagination chrome remains");
-  check((await page.locator('[data-slot="reasoning-text"]').innerText()).includes("REASONING_END"), "latest reasoning is missing");
-  check((await page.evaluate(() => window.__reasoning.stats())).mounted < 20000, "saved trace mounted unbounded content");
+  await page.waitForFunction(() => (document.querySelector('[data-slot="reasoning-text"]')?.textContent ?? "").includes("REASONING_END"), null, { timeout: 5000 }).catch(() => {});
+  check((await page.locator('[data-slot="reasoning-text"]').evaluate((node) => node.textContent)).includes("REASONING_END"), "latest reasoning is missing");
+  const seeded = await page.evaluate(() => window.__reasoning.stats());
+  check(seeded.rows >= 8, "saved trace did not mount its fragments");
+  check(!seeded.contained || seeded.rendered < seeded.rows, "saved trace renders every row although the engine can skip them");
 
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.getByRole("button", { name: "Copy reasoning", exact: true }).click();
@@ -25,7 +28,7 @@ async (page) => {
   await trigger.click();
   await page.waitForTimeout(400);
   check(Math.abs((await trigger.boundingBox()).y - headerTop) < 3, "reopening moved the header");
-  check((await page.locator('[data-slot="reasoning-text"]').innerText()).includes("Flappy Bird game"), "reopening did not expose the beginning");
+  check((await page.locator('[data-slot="reasoning-text"]').evaluate((node) => node.textContent)).includes("Flappy Bird game"), "reopening did not expose the beginning");
   await page.screenshot({ path: ".playwright-cli/reasoning-inline-desktop.png" });
 
   await page.evaluate(() => window.__reasoning.run({ size: 24000, chunk: 1024, gap: 120 }));
@@ -87,11 +90,11 @@ async (page) => {
   await trigger.click();
   await page.waitForTimeout(400);
   check(Math.abs((await trigger.boundingBox()).y - liveHeaderTop) < 3, "reopening live reasoning moved its header");
-  check((await page.locator('[data-slot="reasoning-text"]').innerText()).includes("Flappy Bird game"), "live reopening reused a stale reading anchor");
+  check((await page.locator('[data-slot="reasoning-text"]').evaluate((node) => node.textContent)).includes("Flappy Bird game"), "live reopening reused a stale reading anchor");
   await page.getByRole("button", { name: "Scroll to bottom", exact: true }).click();
   await page.waitForFunction(() => window.__reasoning.stats().done, null, { timeout: 30000 });
   await page.waitForTimeout(500);
-  check((await page.locator('[data-slot="reasoning-text"]').innerText()).includes("REASONING_END"), "following did not resume");
+  check((await page.locator('[data-slot="reasoning-text"]').evaluate((node) => node.textContent)).includes("REASONING_END"), "following did not resume");
 
   await page.evaluate(() => window.__reasoning.seed({
     size: 100000,

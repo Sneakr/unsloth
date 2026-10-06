@@ -12,8 +12,6 @@ import {
 } from "@/components/assistant-ui/generated-image-overlay-context";
 import { CompactionNotice } from "@/components/assistant-ui/compaction-notice";
 import {
-  compactionBoundary,
-  shouldShowCompactionNotice,
   type ContextTruncation,
 } from "@/features/chat/utils/context-truncation";
 import { downloadImagePart } from "@/components/assistant-ui/image";
@@ -27,6 +25,8 @@ import { ComposerDraftPreview } from "@/components/assistant-ui/composer-draft-p
 import { PromptQueueList } from "@/components/assistant-ui/lazy-prompt-queue-list";
 import { QueueResumeIcon } from "@/components/assistant-ui/queue-resume-icon";
 import { ProgressiveMessages } from "@/components/assistant-ui/progressive-messages";
+import { compactionNoticeOwners } from "@/components/assistant-ui/compaction-notice-owners";
+import { memoOnArray } from "@/components/assistant-ui/message-derived";
 import { MessageMenuTime } from "@/components/assistant-ui/message-menu-time";
 import { UserMessageActionBar, UserMessageFooter } from "@/components/assistant-ui/user-message-actions";
 import { useActionBarFocusReveal } from "@/components/assistant-ui/use-action-bar-focus-reveal";
@@ -1826,6 +1826,8 @@ const ThreadMessage: FC = () => {
  * The walk stops at the first message the fork did not inherit, so it costs the inherited
  * count rather than the thread length.
  */
+const FORK_BOUNDARY_NONE: readonly string[] = [];
+
 const useTrackForkBoundaryAnchor = (threadId: string | null): void => {
   const inherited = useForkBoundaryStore((s) =>
     threadId === null
@@ -1833,7 +1835,9 @@ const useTrackForkBoundaryAnchor = (threadId: string | null): void => {
       : s.boundaryByThreadId[threadId]?.messageIds,
   );
   const anchor = useAuiState(({ thread }) =>
-    forkBoundaryAnchor(thread.messages, inherited),
+    memoOnArray(thread.messages, inherited ?? FORK_BOUNDARY_NONE, () =>
+      forkBoundaryAnchor(thread.messages, inherited),
+    ),
   );
   useEffect(() => {
     setForkBoundaryAnchor(threadId, anchor);
@@ -7930,25 +7934,9 @@ const AssistantMessage: FC = () => {
   // matters is when MORE of the conversation fell out of view: the eviction boundary
   // rising above the last turn that reported one, or a checkpoint starting inside a tool
   // loop (which evicts without moving the boundary). Sticky replays stay quiet.
-  const showsNotice = useAuiState(({ thread }) => {
-    let previousDropped = 0;
-    for (const message of thread.messages) {
-      if (message.role !== "assistant") continue;
-      const value = (
-        message.metadata as
-          | { custom?: { contextTruncation?: unknown } }
-          | undefined
-      )?.custom?.contextTruncation as ContextTruncation | undefined;
-      const dropped = compactionBoundary(value);
-      if (shouldShowCompactionNotice(value, previousDropped)) {
-        if (message.id === messageId) return true;
-        previousDropped = Math.max(previousDropped, dropped);
-      } else if (message.id === messageId) {
-        return false;
-      }
-    }
-    return false;
-  });
+  const showsNotice = useAuiState(({ thread }) =>
+    compactionNoticeOwners(thread.messages).has(messageId),
+  );
   const incognito = useChatRuntimeStore((s) => s.incognito);
 
   // Use global store for editing state to ensure a single source of truth

@@ -1572,17 +1572,43 @@ export class IncrementalMarkdownCache {
   }
 }
 
+type RehypePluginList = NonNullable<BlockProps["rehypePlugins"]>;
+
+const samePluginEntry = (
+  a: RehypePluginList[number],
+  b: RehypePluginList[number],
+): boolean =>
+  a === b
+  || (Array.isArray(a)
+    && Array.isArray(b)
+    && a.length === b.length
+    && a.every((value, index) => value === b[index]));
+
+const filteredPluginLists = new WeakMap<RehypePluginList, RehypePluginList>();
+let lastFilteredPluginList: RehypePluginList | null = null;
+
 export function withoutStreamdownAnimationPlugin(
   rehypePlugins: BlockProps["rehypePlugins"],
   animatePlugin: BlockProps["animatePlugin"],
 ): BlockProps["rehypePlugins"] {
   const animationPlugin = animatePlugin?.rehypePlugin;
-  if (!animationPlugin) {
+  if (!animationPlugin || !rehypePlugins) {
     return rehypePlugins;
   }
-
-  return rehypePlugins?.filter((plugin) => {
+  const known = filteredPluginLists.get(rehypePlugins);
+  if (known !== undefined) return known;
+  const filtered = rehypePlugins.filter((plugin) => {
     const pluginFunction = Array.isArray(plugin) ? plugin[0] : plugin;
     return pluginFunction !== animationPlugin;
   });
+  const previous = lastFilteredPluginList;
+  const stable =
+    previous !== null
+    && previous.length === filtered.length
+    && previous.every((plugin, index) => samePluginEntry(plugin, filtered[index]))
+      ? previous
+      : filtered;
+  filteredPluginLists.set(rehypePlugins, stable);
+  lastFilteredPluginList = stable;
+  return stable;
 }

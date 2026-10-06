@@ -176,6 +176,14 @@ function Api() {
               ?.length ?? 0,
           fragments: document.querySelectorAll("[data-reasoning-fragment]")
             .length,
+          rows: document.querySelectorAll("[data-reasoning-row]").length,
+          rendered:
+            document.querySelectorAll("[data-reasoning-row]").length -
+            skippedRows.size,
+          contained:
+            document.documentElement.getAttribute(
+              "data-reasoning-row-containment",
+            ) === "on",
         };
       },
     };
@@ -184,6 +192,32 @@ function Api() {
   }, [aui]);
   return null;
 }
+
+const skippedRows = new Set<Element>();
+const watchSkippedRows = (root: Element): void => {
+  const attach = (row: Element) => {
+    row.addEventListener("contentvisibilityautostatechange", (event) => {
+      if ((event as Event & { skipped: boolean }).skipped) skippedRows.add(row);
+      else skippedRows.delete(row);
+    });
+  };
+  for (const row of root.querySelectorAll("[data-reasoning-row]")) attach(row);
+  new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches("[data-reasoning-row]")) attach(node);
+        for (const row of node.querySelectorAll("[data-reasoning-row]")) attach(row);
+      }
+      for (const node of record.removedNodes) {
+        if (!(node instanceof Element)) continue;
+        skippedRows.delete(node);
+        for (const row of node.querySelectorAll("[data-reasoning-row]")) skippedRows.delete(row);
+      }
+    }
+  }).observe(root, { childList: true, subtree: true });
+};
+if (typeof document !== "undefined") watchSkippedRows(document.documentElement);
 
 function Harness() {
   const runtime = useLocalRuntime(adapter);

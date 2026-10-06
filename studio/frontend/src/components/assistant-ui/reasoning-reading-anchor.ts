@@ -44,6 +44,8 @@ export function reasoningTextRange(
   return null;
 }
 
+let probe: Range | null = null;
+
 /** Capture the first visible character, including when its block starts above the viewport. */
 export function captureReasoningAnchor(
   root: Element,
@@ -51,9 +53,9 @@ export function captureReasoningAnchor(
 ): ReasoningReadingAnchor | undefined {
   const bounds = viewport.getBoundingClientRect();
   const nodes = textNodes(root);
+  const range = (probe ??= document.createRange());
   let preceding = "";
   for (const node of nodes) {
-    const range = document.createRange();
     range.selectNodeContents(node);
     const rect = range.getBoundingClientRect();
     if (

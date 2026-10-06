@@ -9,6 +9,7 @@
 // already rendered it, and skips full documents the in-place collapse handles.
 
 import { ArtifactCard, useChatRuntimeStore } from "@/features/chat";
+import { derivedForParts } from "./message-derived";
 import {
   extractHtmlFences,
   isRenderableRenderHtmlToolPart,
@@ -30,11 +31,8 @@ export const MessageHtmlArtifacts: FC = () => {
   );
   // Visible assistant text parts only (no reasoning, tools, sources, or errors),
   // kept separate so a fence stays within the part the user actually sees.
-  const textBlob = useAuiState(({ message }) =>
-    message.content
-      .filter((part) => part.type === "text" && "text" in part)
-      .map((part) => (part as { text: string }).text)
-      .join(PART_SEPARATOR),
+  const textBlob = useAuiState(
+    ({ message }) => derivedForParts(message.content).textBlob,
   );
   const artifactsEnabled = useChatRuntimeStore(
     (state) => state.artifactsEnabled,

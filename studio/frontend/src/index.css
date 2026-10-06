@@ -4593,6 +4593,33 @@ html[data-chat-font] .aui-root {
 			contain-intrinsic-size: none !important;
 		}
 	}
+
+	html[data-code-block-containment="on"] .aui-thread-root [data-streamdown="code-block"]:not([data-incomplete]) > [data-streamdown="code-block-body"][data-unsloth-fence-windowed] {
+		content-visibility: auto;
+		contain-intrinsic-size: auto var(--unsloth-fence-height);
+	}
+
+	@media print {
+		.aui-thread-root [data-streamdown="code-block-body"] {
+			content-visibility: visible !important;
+			contain-intrinsic-size: none !important;
+		}
+	}
+
+	.aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-row] {
+		contain-intrinsic-size: auto var(--unsloth-row-estimate);
+	}
+
+	html[data-reasoning-row-containment="on"] .aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-row][data-settled] {
+		content-visibility: auto;
+	}
+
+	@media print {
+		.aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-row] {
+			content-visibility: visible !important;
+			contain-intrinsic-size: none !important;
+		}
+	}
 }
 
 /* No border line; a soft layered shadow lifts the toast off the page.

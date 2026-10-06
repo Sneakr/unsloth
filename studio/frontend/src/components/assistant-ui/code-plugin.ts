@@ -199,9 +199,17 @@ const shedsClosingRun = (shorter: string, longer: string): boolean =>
   longer.startsWith(shorter) &&
   CLOSING_FENCE.test(longer.slice(shorter.length));
 
+export type UnslothCodePlugin = CodeHighlighterPlugin & {
+  cached: (opts: HighlightOptions) => HighlightResult | null;
+  seed: (opts: HighlightOptions, result: HighlightResult) => void;
+};
+
+const fenceKeyOf = (opts: HighlightOptions): string =>
+  `${normalizeLanguage(opts.language)} ${themeKey(opts.themes[0])} ${themeKey(opts.themes[1])}`;
+
 export function createCodePlugin(
   options: CodePluginOptions = {},
-): CodeHighlighterPlugin {
+): UnslothCodePlugin {
   const defaultThemes: [ThemeInput, ThemeInput] = options.themes ?? [
     "github-light",
     "github-dark",
@@ -473,6 +481,34 @@ export function createCodePlugin(
   return {
     name: "shiki",
     type: "code-highlighter",
+    cached: (opts) => {
+      const exact = fencesByCode.get(codeKey(fenceKeyOf(opts), opts.code));
+      return exact && exact.code === opts.code && exact.result
+        ? promote(exact).result
+        : null;
+    },
+    seed: (opts, result) => {
+      const key = fenceKeyOf(opts);
+      const exact = fencesByCode.get(codeKey(key, opts.code));
+      if (exact && exact.code === opts.code && exact.result) return;
+      const fence: Fence = {
+        key,
+        code: opts.code,
+        result,
+        meta: stripTokens(result),
+        lines: result.tokens,
+        committedLength: opts.code.length,
+        state: undefined,
+        liveTokens: null,
+        lastTokenizedAt: monotonicNow(),
+        trailing: null,
+        pending: null,
+      };
+      fences.unshift(fence);
+      cachedCharacters += opts.code.length;
+      fencesByCode.set(codeKey(key, opts.code), fence);
+      evict();
+    },
     getSupportedLanguages: () => SUPPORTED_LANGUAGE_LIST,
     getThemes: () => defaultThemes,
     supportsLanguage: (language) =>

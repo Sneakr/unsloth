@@ -154,6 +154,12 @@ function pickAnchorRow(viewport: HTMLElement): Element | null {
   // Range and a rect every frame, and not itself stable across the reflow it would measure.
   for (let depth = 0; depth < 8; depth += 1) {
     if (anchor.getBoundingClientRect().top >= fold) break;
+    if (
+      typeof anchor.checkVisibility === "function"
+      && !anchor.checkVisibility({ contentVisibilityAuto: true })
+    ) {
+      break;
+    }
     let next: Element | null = null;
     for (const child of anchor.children) {
       if (child.getBoundingClientRect().bottom > fold) {

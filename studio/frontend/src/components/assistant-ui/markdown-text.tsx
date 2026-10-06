@@ -82,6 +82,9 @@ import {
   trimTrailingNewlines,
   useFenceReached,
 } from "./code-fence-defer";
+import { requestFullHighlight } from "./use-reasoning-highlight";
+import { derivedForParts, memoOnArray } from "./message-derived";
+import { MAX_HIGHLIGHT_CHARS } from "@/lib/markdown-plugins";
 import { markdownBlockFallback } from "./markdown-block-fallback";
 import { createCodePlugin } from "./code-plugin";
 import { withMathBlockMarker } from "./math-block-marker";
@@ -894,27 +897,32 @@ function StreamdownBlockContent(props: BlockProps) {
  * chunk N can arrive after chunk N+1 has already been rendered, and letting it through would walk
  * the fence backwards by a frame.
  */
+const fenceHighlightOptions = (body: string, languageToken: string | null) => ({
+  code: body,
+  language: (languageToken ?? "text") as never,
+  themes: STREAMDOWN_SHIKI_THEME,
+});
+
+const tokenizesOffThread = (body: string, streaming: boolean): boolean =>
+  !streaming && body.length > MAX_HIGHLIGHT_CHARS;
+
 function useFenceTokens(
   source: string,
   languageToken: string | null,
   enabled: boolean,
+  streaming: boolean,
 ): FenceTokens | null {
   const highlight = useCallback(
     (body: string, late: (result: FenceTokens) => void) =>
-      code.highlight(
-        {
-          code: body,
-          language: (languageToken ?? "text") as never,
-          themes: STREAMDOWN_SHIKI_THEME,
-        },
-        late,
-      ),
+      code.highlight(fenceHighlightOptions(body, languageToken), late),
     [languageToken],
   );
   const [seed] = useState<{ body: string; tokens: FenceTokens } | null>(() => {
     if (!enabled) return null;
     const body = trimTrailingNewlines(source);
-    const settled = highlight(body, () => {});
+    const settled = tokenizesOffThread(body, streaming)
+      ? code.cached(fenceHighlightOptions(body, languageToken))
+      : highlight(body, () => {});
     return settled ? { body, tokens: settled } : null;
   });
   const [tokens, setTokens] = useState<FenceTokens | null>(
@@ -939,17 +947,32 @@ function useFenceTokens(
       seedConsumed.current = true;
       if (seed?.body === body) return;
     }
-    const settled = highlight(body, (late) => {
-      if (wanted.current === body) setTokens(late);
-    });
+    const late = (result: FenceTokens) => {
+      if (wanted.current === body) setTokens(result);
+    };
+    let cancel: (() => void) | null = null;
+    let settled: FenceTokens | null = null;
+    if (tokenizesOffThread(body, streaming)) {
+      const options = fenceHighlightOptions(body, languageToken);
+      settled = code.cached(options);
+      if (settled === null) {
+        cancel = requestFullHighlight(body, languageToken, (result) => {
+          if (wanted.current !== body) return;
+          code.seed(options, result);
+          setTokens(result);
+        });
+      }
+      if (settled === null && cancel === null) settled = highlight(body, late);
+    } else {
+      settled = highlight(body, late);
+    }
     // `settled === null` means the plugin caught a tokenization error; keeping the previous
     // tokens would show an older, shorter body. The callback restores them if it succeeds later.
     setTokens(settled ?? null);
-  }, [enabled, source, highlight, seed]);
+    return cancel ?? undefined;
+  }, [enabled, source, highlight, seed, streaming, languageToken]);
   return tokens;
 }
-
-const STREAMING_WINDOW_CAP_LINES = 240;
 
 /**
  * A fence that is still being written.
@@ -970,7 +993,7 @@ function StreamingFenceBlock({
 }) {
   const languageToken = language?.trim().split(/\s+/)[0] || null;
   if (isIncomplete) noteStreamingFence(languageToken, source);
-  const tokens = useFenceTokens(source, languageToken, true);
+  const tokens = useFenceTokens(source, languageToken, true, isIncomplete);
   return (
     <MarkdownRendererBoundary
       fallback={<DeferredFenceShell language={languageToken} source={source} />}
@@ -981,7 +1004,6 @@ function StreamingFenceBlock({
         result={tokens}
         source={source}
         windowing={isIncomplete || fenceMode() === "window"}
-        windowCap={isIncomplete ? STREAMING_WINDOW_CAP_LINES : undefined}
       />
     </MarkdownRendererBoundary>
   );
@@ -1031,13 +1053,15 @@ function FenceBlock({
      */
   const warm = useCallback(
     (tokens: boolean) => {
-      code.highlight({
-        code: tokens ? trimTrailingNewlines(source) : "",
-        language: (languageToken ?? "text") as never,
-        themes: STREAMDOWN_SHIKI_THEME,
-      }, () => {});
+      const body = trimTrailingNewlines(source);
+      const options = fenceHighlightOptions(body, languageToken);
+      const inline =
+        tokens
+        && (!tokenizesOffThread(body, Boolean(isIncomplete))
+          || code.cached(options) !== null);
+      code.highlight(inline ? options : fenceHighlightOptions("", languageToken), () => {});
     },
-    [source, languageToken],
+    [source, languageToken, isIncomplete],
   );
 
   // A streaming fence is the one the reader is watching, so it never defers, and the hook latches
@@ -1058,7 +1082,12 @@ function FenceBlock({
   // Asked for only once the fence is reached, so a deferred fence still tokenizes nothing. The
   // latch calls `warm(true)` synchronously on the way in, so this is a cache hit rather than the
   // first tokenization of the body.
-  const tokens = useFenceTokens(source, languageToken, reached);
+  const tokens = useFenceTokens(
+    source,
+    languageToken,
+    reached,
+    Boolean(isIncomplete),
+  );
 
   const pretokenize = mode === "tokenize" && !reached;
   useEffect(() => {
@@ -1375,22 +1404,24 @@ const MarkdownTextImpl = () => {
   );
   // A string, not the Map: selector results are compared by identity.
   const searchImagesKey = useAuiState(({ message }) =>
-    allowSearchImages ? searchImagesSignature(message.parts) : "",
+    allowSearchImages
+      ? memoOnArray(message.parts, "searchImages", () =>
+          searchImagesSignature(message.parts),
+        )
+      : "",
   );
   // What earlier text parts said, so a subject named in two of them gets one card.
   const precedingText = useAuiState(({ message }) =>
     allowSearchImages
-      ? precedingTextForMessagePart(message.parts, partIndex)
+      ? memoOnArray(message.parts, `preceding:${partIndex}`, () =>
+          precedingTextForMessagePart(message.parts, partIndex),
+        )
       : "",
   );
   const messageTextKey = useAuiState(({ message }) =>
     allowSearchImages &&
     !("status" in message && message.status?.type === "running")
-      ? JSON.stringify(
-          message.parts
-            .filter((part) => part.type === "text")
-            .map((part) => part.text),
-        )
+      ? derivedForParts(message.parts).textKey
       : "[]",
   );
 

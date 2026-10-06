@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  EMPTY_LINE_WINDOW,
   HYSTERESIS_VIEWPORTS,
   lineIsWindowed,
   OVERSCAN_VIEWPORTS,
@@ -143,6 +144,17 @@ test("geometry that cannot be trusted degrades to highlighting everything", () =
       `geometry ${JSON.stringify(broken)} must not produce a window`,
     );
   }
+});
+
+test("the empty window highlights no line and never pins a measurement", () => {
+  assert.equal(lineIsWindowed(EMPTY_LINE_WINDOW, 0), false);
+  assert.equal(lineIsWindowed(EMPTY_LINE_WINDOW, 19_999), false);
+  const measured = selectLineWindow(
+    geometry({ viewportTop: 10_000, previous: EMPTY_LINE_WINDOW }),
+  );
+  assert.ok(measured);
+  assert.notEqual(measured, EMPTY_LINE_WINDOW, "the first measurement replaces it");
+  assert.ok(measured.first <= 500 && measured.last >= 529, "with the visible lines");
 });
 
 test("a null window highlights every line", () => {

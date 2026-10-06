@@ -58,6 +58,7 @@ import { cn } from "@/lib/utils";
 import {
   type ReasoningGroupComponent,
   type ReasoningMessagePartComponent,
+  useAui,
   useAuiState,
 } from "@assistant-ui/react";
 import { copyToClipboard } from "@/lib/copy-to-clipboard";
@@ -367,21 +368,22 @@ function ReasoningCopyButton({
   const [copied, setCopied] = useState(false);
   const resetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const reasoningText = useAuiState(({ message }) => {
-    return message.parts
-      .slice(startIndex, endIndex + 1)
+  const aui = useAui();
+
+  const handleCopy = useCallback(async () => {
+    const reasoningText = aui
+      .message()
+      .getState()
+      .parts.slice(startIndex, endIndex + 1)
       .filter((p) => p.type === "reasoning")
       .map((p) => ("text" in p ? (p as { text: string }).text : ""))
       .join("\n");
-  });
-
-  const handleCopy = useCallback(async () => {
     if (await copyToClipboard(reasoningText)) {
       setCopied(true);
       if (resetRef.current) clearTimeout(resetRef.current);
       resetRef.current = setTimeout(() => setCopied(false), COPY_RESET_MS);
     }
-  }, [reasoningText]);
+  }, [aui, startIndex, endIndex]);
 
   return (
     <IconActionButton

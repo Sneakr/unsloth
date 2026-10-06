@@ -16,16 +16,20 @@ import {
 import { flushSync } from "react-dom";
 
 import { MAX_HIGHLIGHT_CHARS } from "@/lib/markdown-plugins";
+import { FENCE_HEIGHT_PROPERTY } from "./code-block-containment-mode";
 import { type FenceMode, resolveFenceMode } from "./code-fence-mode";
 import {
+  EMPTY_LINE_WINDOW,
+  HYSTERESIS_VIEWPORTS,
   isBlankLine,
   type LineWindow,
   lineIsWindowed,
+  OVERSCAN_VIEWPORTS,
   plainLineText,
   selectLineWindow,
+  WINDOW_CAP_LINES,
 } from "./code-fence-window";
 import { normalizeLanguage } from "./code-plugin";
-import { WINDOW_CAP_LINES } from "./code-fence-window";
 
 /*
  * MONOTONIC fence highlighting: a fence renders as a plain shell until the first time it comes near
@@ -773,6 +777,59 @@ export const FenceLine = memo(function FenceLine({
 const windowedFences = new Set<() => void>();
 let windowFrame = 0;
 let windowWatched = false;
+let frameRects: Map<Element, DOMRect> | null = null;
+let frameScrollable: Map<HTMLElement, boolean> | null = null;
+let frameFlying: Map<Element | null, boolean> | null = null;
+let frameSettle = false;
+const scrollerMotion = new WeakMap<Element, { top: number; at: number }>();
+const windowMotion = { top: 0, at: 0 };
+const FLYING_VIEWPORTS_PER_SECOND = 10;
+
+const rectDuringFrame = (element: Element): DOMRect => {
+  if (frameRects === null) return element.getBoundingClientRect();
+  const known = frameRects.get(element);
+  if (known !== undefined) return known;
+  const rect = element.getBoundingClientRect();
+  frameRects.set(element, rect);
+  return rect;
+};
+
+const scrollableDuringFrame = (element: HTMLElement): boolean => {
+  if (frameScrollable === null) return isScrollable(element);
+  const known = frameScrollable.get(element);
+  if (known !== undefined) return known;
+  const scrollable = isScrollable(element);
+  frameScrollable.set(element, scrollable);
+  return scrollable;
+};
+
+const flyingDuringFrame = (
+  scroller: HTMLElement | null,
+  viewportHeight: number,
+): boolean => {
+  if (frameFlying === null) return false;
+  const known = frameFlying.get(scroller);
+  if (known !== undefined) return known;
+  const top = scroller === null ? window.scrollY : scroller.scrollTop;
+  const at = performance.now();
+  const before = scroller === null ? windowMotion : scrollerMotion.get(scroller);
+  const elapsed = before === undefined ? 0 : at - before.at;
+  const flying =
+    before !== undefined
+    && elapsed > 0
+    && viewportHeight > 0
+    && (Math.abs(top - before.top) / elapsed) * 1000
+      > viewportHeight * FLYING_VIEWPORTS_PER_SECOND;
+  if (scroller === null) {
+    windowMotion.top = top;
+    windowMotion.at = at;
+  } else {
+    scrollerMotion.set(scroller, { top, at });
+  }
+  frameFlying.set(scroller, flying);
+  if (flying) frameSettle = true;
+  return flying;
+};
 
 /*
  * A print puts the whole document on the page, so the whole fence is coloured;
@@ -787,7 +844,20 @@ let printing = false;
 
 const remeasureWindows = (): void => {
   windowFrame = 0;
-  for (const measure of windowedFences) measure();
+  frameRects = new Map();
+  frameScrollable = new Map();
+  frameFlying = new Map();
+  frameSettle = false;
+  try {
+    for (const measure of windowedFences) measure();
+  } finally {
+    frameRects = null;
+    frameScrollable = null;
+    frameFlying = null;
+  }
+  if (frameSettle && windowedFences.size > 0 && !printing) {
+    windowFrame = requestAnimationFrame(remeasureWindows);
+  }
 };
 
 /** Is a print in progress? While it is, every fence renders every line highlighted. */
@@ -847,109 +917,151 @@ const unwatchWindows = (): void => {
  * The geometry is read here and the decision is made in `code-fence-window.ts`, which is a
  * JSX-free module so that a test can RUN the arithmetic rather than regex this file.
  */
+type LineWindowState =
+  | { measured: false }
+  | { measured: true; window: LineWindow | null };
+
+const UNMEASURED: LineWindowState = { measured: false };
+
+type FenceMetrics = {
+  lineHeight: number;
+  contentInset: number;
+  scrollbar: number;
+};
+
+type FenceGeometry = FenceMetrics & {
+  scroller: HTMLElement | null;
+};
+
+const readFenceMetrics = (
+  node: HTMLElement,
+  surface: HTMLElement,
+  lineCount: number,
+  previous: FenceMetrics | null,
+): FenceMetrics => {
+  const style = getComputedStyle(surface);
+  const borders =
+    (Number.parseFloat(style.borderTopWidth) || 0)
+    + (Number.parseFloat(style.borderBottomWidth) || 0);
+  const declared = Number.parseFloat(style.lineHeight);
+  const lineHeight =
+    declared > 0
+      ? style.lineHeight.endsWith("px")
+        ? declared
+        : declared * (Number.parseFloat(style.fontSize) || 0)
+      : previous?.lineHeight
+        ?? (lineCount > 0 ? node.getBoundingClientRect().height / lineCount : 0);
+  return {
+    lineHeight,
+    contentInset:
+      (Number.parseFloat(style.borderTopWidth) || 0)
+      + (Number.parseFloat(style.paddingTop) || 0),
+    scrollbar: Math.max(0, surface.offsetHeight - surface.clientHeight - borders),
+  };
+};
+
+const readFenceGeometry = (
+  node: HTMLElement,
+  surface: HTMLElement,
+  outer: HTMLElement,
+  lineCount: number,
+): FenceGeometry => {
+  const scroller = scrollerOf(outer);
+  return { scroller, ...readFenceMetrics(node, surface, lineCount, null) };
+};
+
+const FAR_VIEWPORTS = OVERSCAN_VIEWPORTS + HYSTERESIS_VIEWPORTS + 1;
+
 function useLineWindow(
   code: RefObject<HTMLElement | null>,
-  /*
-     * The fence's outermost element, and the ONLY thing it is used for is finding the scrolling
-     * ancestor. `scrollerOf` starts at `parentElement` and tests `overflow-y`, and a code block
-     * carries `overflow-x: auto`, which makes `overflow-y` compute to `auto` as well
-     * (css-overflow-3: a non-visible value on one axis forces the other off `visible`). Walking up
-     * from the `<code>` would therefore be one `scrollHeight` away from rooting the whole window
-     * calculation inside the fence's own horizontal scroller. Starting outside the block skips
-     * both of them, and it is the element the reach latch already measures against.
-     */
+  surface: RefObject<HTMLElement | null>,
   frame: RefObject<HTMLElement | null>,
   lineCount: number,
   enabled: boolean,
-  cap: number = WINDOW_CAP_LINES,
 ): LineWindow | null {
-  const [lineWindow, setLineWindow] = useState<LineWindow | null>(null);
-  // The rendered window, read by `measure` without making it an effect dependency: the effect
-  // registers a listener, and rebuilding that on every window move would defeat the coalescing.
+  const [state, setState] = useState<LineWindowState>(UNMEASURED);
   const current = useRef<LineWindow | null>(null);
+  const geometry = useRef<FenceGeometry | null>(null);
+  const metricsStale = useRef(false);
+  const written = useRef(-1);
   const lines = useRef(lineCount);
   lines.current = lineCount;
   const hasBody = lineCount > 0;
+  const overCap = lineCount > WINDOW_CAP_LINES;
   const measure = useRef<() => void>(() => {});
 
   measure.current = () => {
     const node = code.current;
     const outer = frame.current;
-    if (!node || !outer) return;
-    // Under the cap a window can never apply, so no layout read is needed. A streaming fence that
-    // grows past the cap re-registers through the ResizeObserver.
-    if (lines.current <= cap && current.current === null) return;
-    // See `setPrinting`: the whole document is on the page, so the whole fence is coloured.
+    const body = surface.current;
+    if (!node || !outer || !body) return;
+    if (lines.current <= WINDOW_CAP_LINES && current.current === null) return;
     if (printing) {
       if (current.current === null) return;
       current.current = null;
-      setLineWindow(null);
+      setState({ measured: true, window: null });
       return;
     }
-    const scroller = scrollerOf(outer);
-    const bounds = scroller?.getBoundingClientRect();
-    const rect = node.getBoundingClientRect();
-    const count = lines.current;
+    let known = geometry.current;
+    if (
+      known === null
+      || (known.scroller !== null && !scrollableDuringFrame(known.scroller))
+    ) {
+      known = readFenceGeometry(node, body, outer, lines.current);
+    } else if (metricsStale.current) {
+      known = { scroller: known.scroller, ...readFenceMetrics(node, body, lines.current, known) };
+    }
+    metricsStale.current = false;
+    geometry.current = known;
+    const height =
+      Math.round((lines.current * known.lineHeight + known.scrollbar) * 1000) / 1000;
+    if (height !== written.current) {
+      written.current = height;
+      body.style.setProperty(FENCE_HEIGHT_PROPERTY, `${height}px`);
+    }
+    const bounds = known.scroller === null ? null : rectDuringFrame(known.scroller);
+    const viewportTop = bounds ? bounds.top : 0;
+    const viewportHeight = bounds ? bounds.height : window.innerHeight;
+    const box = rectDuringFrame(body);
+    const reach = viewportHeight * FAR_VIEWPORTS;
+    if (
+      current.current !== null
+      && (box.bottom < viewportTop - reach || box.top > viewportTop + viewportHeight + reach)
+    ) {
+      return;
+    }
+    if (current.current !== null && flyingDuringFrame(known.scroller, viewportHeight)) return;
     const next = selectLineWindow({
-      lineCount: count,
-      // MEASURED, never assumed. `index.css` pins `line-height: 1.55` on the code block, but the
-      // font size is a `--ui-font-scale` multiple inside a container query, so the pixel height is
-      // not knowable from here. Every line is rendered, so the mean IS the line height.
-      lineHeight: count > 0 ? rect.height / count : 0,
-      contentTop: rect.top,
-      viewportTop: bounds ? bounds.top : 0,
-      viewportHeight: bounds ? bounds.height : window.innerHeight,
+      lineCount: lines.current,
+      lineHeight: known.lineHeight,
+      contentTop: box.top + known.contentInset,
+      viewportTop,
+      viewportHeight,
       previous: current.current,
-      cap,
     });
-    // `selectLineWindow` hands the previous object straight back when nothing moved, so this is an
-    // identity check and an ordinary scroll costs no render at all.
     if (next === current.current) return;
     current.current = next;
-    setLineWindow(next);
+    setState({ measured: true, window: next });
   };
 
-  /*
-     * IN A LAYOUT EFFECT, AND KEYED ON THE BODY EXISTING.
-     * Two things go wrong with a passive effect keyed on `enabled` alone, and the browser probe
-     * caught both. A fence renders the plain shell until its grammar chunk lands, so at mount there
-     * is no `<code>` to measure and no element for the ResizeObserver to watch; keyed only on
-     * `enabled` the effect never runs again once the tokens arrive, and the window stayed off until
-     * the reader happened to scroll (measured: 30,861 spans still mounted). And a passive effect
-     * lands after the paint, so the frame that introduces a 20,000 line fence paints every span in
-     * it before the window takes them away. Layout effects run after mutation and before paint, so
-     * the first painted frame is already windowed.
-     */
   useLayoutEffect(() => {
     if (!enabled) {
       current.current = null;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLineWindow(null);
+      geometry.current = null;
+      written.current = -1;
       return;
     }
     const run = () => measure.current();
     windowedFences.add(run);
     watchWindows();
     run();
-    /*
-       * The fence's own growth moves nothing the scroll listener would notice: a streamed line
-       * lands below the viewport and the reader has not moved. A ResizeObserver on the code
-       * element is what sees it, and it also covers the font finishing loading, the thread column
-       * changing width, and the reasoning pane expanding.
-       */
-    /*
-       * OBSERVED ON THE WRAPPER, NOT ON THE `<code>`.
-       * A `<code>` is `display: inline`, and ResizeObserver does not observe an element with no
-       * principal box: the callback simply never fires. Measured, not read off the spec -- with the
-       * observer on the `<code>` a fence streamed past 3,000 lines and 23,139 spans and the window
-       * never once engaged, because the only thing that ever called `measure` was the one call this
-       * effect makes, back when the fence was one line long. The wrapper is a flex container, it
-       * grows by exactly what the code grows by, and it is already resolved here.
-       */
     let resize: ResizeObserver | undefined;
     const box = frame.current;
     if (box && typeof ResizeObserver !== "undefined") {
-      resize = new ResizeObserver(scheduleRemeasure);
+      resize = new ResizeObserver(() => {
+        metricsStale.current = true;
+        scheduleRemeasure();
+      });
       resize.observe(box);
     }
     return () => {
@@ -957,12 +1069,16 @@ function useLineWindow(
       windowedFences.delete(run);
       unwatchWindows();
     };
-    // `hasBody` and not `lineCount`: the count changes on every streamed line and re-registering
-    // per line would throw away the coalescing this exists for. The transition that matters is the
-    // shell becoming a real body, and it happens once.
-  }, [enabled, hasBody, code, frame]);
+  }, [enabled, hasBody, code, surface, frame]);
 
-  return enabled ? lineWindow : null;
+  useLayoutEffect(() => {
+    if (!enabled || !overCap || state.measured) return;
+    measure.current();
+  }, [enabled, overCap, state.measured]);
+
+  if (!enabled) return null;
+  if (state.measured) return state.window;
+  return overCap ? EMPTY_LINE_WINDOW : null;
 }
 
 /**
@@ -979,7 +1095,6 @@ export const FenceBody = memo(function FenceBody({
   result,
   source,
   windowing,
-  windowCap,
 }: {
   /** Streamdown's unclosed-fence flag, reproduced as `data-incomplete` on the wrapper. */
   isIncomplete: boolean | undefined;
@@ -988,17 +1103,17 @@ export const FenceBody = memo(function FenceBody({
   source: string;
   /** False keeps every line highlighted however long the fence is, which is what main does. */
   windowing: boolean;
-  windowCap?: number;
 }) {
   const code = useRef<HTMLElement | null>(null);
+  const surface = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const tokens = result?.tokens ?? null;
   const lineWindow = useLineWindow(
     code,
+    surface,
     frame,
     tokens?.length ?? 0,
     windowing,
-    windowCap,
   );
   const languageClass = language === null ? null : `language-${language}`;
 
@@ -1045,6 +1160,7 @@ export const FenceBody = memo(function FenceBody({
         data-language={language ?? undefined}
         data-streamdown="code-block-body"
         data-unsloth-fence-windowed={lineWindow === null ? undefined : "true"}
+        ref={surface}
       >
         <pre className={joinClasses(languageClass, PRE_CLASS)} style={rootStyle}>
           <code className={CODE_CLASS} ref={code}>

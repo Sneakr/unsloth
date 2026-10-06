@@ -17,10 +17,12 @@
 /** An inclusive line range. `null` means "no window": every line renders its token spans. */
 export type LineWindow = { first: number; last: number };
 
+export const EMPTY_LINE_WINDOW: LineWindow = { first: -1, last: -1 };
+
 // Below the cap a fence is highlighted end to end and produces main's DOM byte for byte; the
 // mechanism exists for the 140K-character fence in #10769. Lines, not characters: the bounded cost
 // is mounted elements, which track lines.
-export const WINDOW_CAP_LINES = 2_000;
+export const WINDOW_CAP_LINES = 240;
 
 // Viewports of lookahead each way, matching `REACH_MARGIN`: the reader crosses into already
 // coloured code rather than watching it arrive.
@@ -81,6 +83,7 @@ export const selectLineWindow = (geometry: WindowGeometry): LineWindow | null =>
   const previous = geometry.previous;
   if (
     previous !== null
+    && previous !== EMPTY_LINE_WINDOW
     && previous.first <= Math.max(0, visible.first - slack)
     && previous.last >= Math.min(lineCount - 1, visible.last + slack)
   ) {

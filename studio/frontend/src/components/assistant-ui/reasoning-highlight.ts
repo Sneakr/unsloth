@@ -9,6 +9,7 @@ export type ReasoningHighlightRequest = {
   source: string | { from: number; text: string };
   language: string | null;
   lines: number[];
+  full?: boolean;
 };
 
 /** A client sends its complete source once, then only newly appended bytes. */
@@ -24,6 +25,7 @@ export type ReasoningHighlightReply = {
   client: number;
   revision: number;
   lines: { line: number; tokens: HighlightResult["tokens"][number] }[];
+  result?: HighlightResult | null;
 };
 
 /** Transfer only requested lines; the worker keeps the complete grammar context. */
@@ -40,5 +42,6 @@ export function reasoningHighlightReply(
           return tokens ? [{ line, tokens }] : [];
         })
       : [],
+    ...(request.full ? { result } : {}),
   };
 }
