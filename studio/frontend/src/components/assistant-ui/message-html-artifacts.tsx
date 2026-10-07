@@ -3,7 +3,7 @@
 
 "use client";
 
-// Once an assistant message finishes, append one canvas card per fenced ```html
+// Once an assistant message finishes, append one browser card per fenced ```html
 // block in its text. No render_html tool call, no extra message. Defers to the
 // other paths to avoid duplicates: skips the message when a render_html tool
 // already rendered it, and skips full documents the in-place collapse handles.
@@ -34,9 +34,6 @@ export const MessageHtmlArtifacts: FC = () => {
   const textBlob = useAuiState(
     ({ message }) => derivedForParts(message.content).textBlob,
   );
-  const artifactsEnabled = useChatRuntimeStore(
-    (state) => state.artifactsEnabled,
-  );
   const collapseHtmlArtifacts = useChatRuntimeStore(
     (state) => state.collapseHtmlArtifacts,
   );
@@ -45,10 +42,8 @@ export const MessageHtmlArtifacts: FC = () => {
   );
   // Full docs already shown by the in-place collapse; excluded for diffusion,
   // which keeps its code inline instead. This picks which path renders a full
-  // document, not whether fenced HTML renders at all: the Canvas control is
-  // gone and both flags default off, so gating the cards on them renders none.
-  const collapsesFullDocs =
-    (artifactsEnabled || collapseHtmlArtifacts) && !loadedIsDiffusion;
+  // document, not whether fenced HTML renders at all.
+  const collapsesFullDocs = collapseHtmlArtifacts && !loadedIsDiffusion;
 
   const fences = useMemo(() => {
     if (isRunning || hasRenderHtmlTool) {
