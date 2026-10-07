@@ -83,6 +83,7 @@ import {
 import { isNpuModelId } from "@/features/npu";
 import { GuidedTour, useGuidedTourController } from "@/features/tour";
 import { isTauri } from "@/lib/api-base";
+import { useDocumentFlag } from "@/lib/document-flag";
 import { chatModelLoaded } from "./lib/chat-model-loaded";
 import { hasKnownContextWindow } from "./lib/context-window-known";
 import { isDownloadCancelled } from "@/lib/native-files";
@@ -359,6 +360,7 @@ const BrowserOverlaidContext = createContext(false);
 function BrowserOverlay(): ReactElement {
   const t = useT();
   const dialogRef = useRef<HTMLDivElement>(null);
+  useDocumentFlag("data-browser-overlay-open", true);
   useEffect(() => {
     const previous = document.activeElement;
     const id = window.setTimeout(() => {

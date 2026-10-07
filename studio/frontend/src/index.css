@@ -5782,6 +5782,10 @@ html[data-blocking-screen-open] .interface-zoom-position {
 	display: none;
 }
 
+html[data-browser-overlay-open] [data-find-bar-layer] {
+	display: none;
+}
+
 /* Toasts stack under the open find bar: its top, its h-13, then 8px. Not the zoom popup, which
    shares the surface class. */
 html[data-find-bar-open] [data-sonner-toaster][data-y-position="top"] {

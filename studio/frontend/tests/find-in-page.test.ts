@@ -3268,3 +3268,12 @@ test("nothing of the engine is mounted while the bar is closed", async () => {
 
   assert.equal((FIND_BAR.match(/useFindInPage\(/g) ?? []).length, 1);
 });
+
+test("the find bar hides under the Browser overlay from its first frame", () => {
+  const page = readSrc("features/chat/chat-page.tsx");
+  const start = page.indexOf("function BrowserOverlay(");
+  const overlay = page.slice(start, page.indexOf("\n}\n", start));
+  assert.match(overlay, /useDocumentFlag\("data-browser-overlay-open", true\);/, "the inline modal tells CSS it is up, which nothing else notices until its lazy panel loads");
+  assert.match(INDEX, /html\[data-browser-overlay-open\] \[data-find-bar-layer\] \{\s*display: none;\s*\}/);
+  assert.equal(/html\[data-browser-overlay-open\][^{]*\.interface-zoom-position/.test(INDEX), false, "the zoom popup stays, as upstream keeps it under any dialog");
+});

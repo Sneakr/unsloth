@@ -94,6 +94,22 @@ test("the window measure never reads inside a body that may be skipped", () => {
   assert.match(DEFER, /const FAR_VIEWPORTS = OVERSCAN_VIEWPORTS \+ HYSTERESIS_VIEWPORTS \+ 1;/, "the far band is derived from the window's own margins");
 });
 
+test("the line pitch is measured from layout once per metric set, beside the body", () => {
+  const metrics = DEFER.slice(DEFER.indexOf("const measureLinePitch = "), DEFER.indexOf("const readFenceGeometry = ("));
+  assert.match(metrics, /const pitch = measureLinePitch\(surface\);/);
+  assert.match(metrics, /pitch > 0\s*\? pitch/, "the laid-out pitch wins over a computed line-height the engine truncates to 1/64 px per line");
+  assert.match(metrics, /const context = getComputedStyle\(parent\);/, "keyed on the wrapper, never on the body that may be skipped");
+  assert.equal(/getComputedStyle\((node|code)\b/.test(metrics), false);
+  assert.match(metrics, /surface\.before\(probe\);/, "the probe sits beside the body, outside the skipped subtree");
+  assert.match(metrics, /line\.className = LINE_CLASS;/, "built like the fence's own lines, inside a pre and a code");
+  assert.match(metrics, /\(lines\[PITCH_PROBE_LINES - 1\]\.getBoundingClientRect\(\)\.top - lines\[0\]\.getBoundingClientRect\(\)\.top\)\s*\/ \(PITCH_PROBE_LINES - 1\)/, "the mean advance across the probe's lines, so no padding or border of the probe can leak in and no single line's rounding is multiplied");
+  const probeLines = Number(/const PITCH_PROBE_LINES = (\d+);/.exec(DEFER)?.[1] ?? 0);
+  assert.ok(probeLines >= 32, "enough lines to average Firefox's per-line rounding");
+  assert.match(metrics, /getPropertyValue\("--custom-code-font-size"\)/, "a custom Code font size gets its own entry");
+  assert.match(metrics, /window\.devicePixelRatio/);
+  assert.match(metrics, /probe\.remove\(\);/);
+});
+
 test("a print clears the containment on every code body, through the media query", () => {
   const block = printBlocks(INDEX_CSS).find((candidate) => candidate.includes('[data-streamdown="code-block-body"]')) ?? "";
   assert.notEqual(block, "", "a @media print block names the code body");

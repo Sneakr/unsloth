@@ -1132,6 +1132,43 @@ type FenceGeometry = FenceMetrics & {
   scroller: HTMLElement | null;
 };
 
+const linePitches = new Map<string, number>();
+const PITCH_PROBE_LINES = 64;
+
+const measureLinePitch = (surface: HTMLElement): number => {
+  const parent = surface.parentElement;
+  if (!parent) return 0;
+  const context = getComputedStyle(parent);
+  const key = [
+    context.fontSize,
+    context.lineHeight,
+    getComputedStyle(document.documentElement).getPropertyValue("--custom-code-font-size"),
+    window.devicePixelRatio,
+  ].join("|");
+  const known = linePitches.get(key);
+  if (known !== undefined) return known;
+  const probe = document.createElement("pre");
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;top:0;left:0";
+  const code = document.createElement("code");
+  const lines: HTMLElement[] = [];
+  for (let index = 0; index < PITCH_PROBE_LINES; index += 1) {
+    const line = document.createElement("span");
+    line.className = LINE_CLASS;
+    line.textContent = "x";
+    lines.push(line);
+  }
+  code.append(...lines);
+  probe.append(code);
+  surface.before(probe);
+  const pitch =
+    (lines[PITCH_PROBE_LINES - 1].getBoundingClientRect().top - lines[0].getBoundingClientRect().top)
+    / (PITCH_PROBE_LINES - 1);
+  probe.remove();
+  if (pitch > 0) linePitches.set(key, pitch);
+  return pitch;
+};
+
 const readFenceMetrics = (
   node: HTMLElement,
   surface: HTMLElement,
@@ -1142,14 +1179,17 @@ const readFenceMetrics = (
   const borders =
     (Number.parseFloat(style.borderTopWidth) || 0)
     + (Number.parseFloat(style.borderBottomWidth) || 0);
+  const pitch = measureLinePitch(surface);
   const declared = Number.parseFloat(style.lineHeight);
   const lineHeight =
-    declared > 0
-      ? style.lineHeight.endsWith("px")
-        ? declared
-        : declared * (Number.parseFloat(style.fontSize) || 0)
-      : previous?.lineHeight
-        ?? (lineCount > 0 ? node.getBoundingClientRect().height / lineCount : 0);
+    pitch > 0
+      ? pitch
+      : declared > 0
+        ? style.lineHeight.endsWith("px")
+          ? declared
+          : declared * (Number.parseFloat(style.fontSize) || 0)
+        : previous?.lineHeight
+          ?? (lineCount > 0 ? node.getBoundingClientRect().height / lineCount : 0);
   return {
     lineHeight,
     contentInset:
