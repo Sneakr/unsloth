@@ -594,6 +594,7 @@ const SingleContent = memo(function SingleContent({
     showResearchPanel || showArtifactPanel || showBrowserPanel;
 
   const artifactLayoutActive = showContextPanel || isArtifactPanelLayoutActive;
+  const handleInert = !artifactLayoutActive || browserFullView;
   const artifactPanelSettledOpen =
     showContextPanel &&
     isArtifactPanelLayoutActive &&
@@ -792,6 +793,7 @@ const SingleContent = memo(function SingleContent({
     <>
       <ResizablePanelGroup
         orientation="horizontal"
+        disableCursor
         data-artifact-layout-animating={
           isArtifactLayoutAnimating ? "true" : "false"
         }
@@ -845,24 +847,33 @@ const SingleContent = memo(function SingleContent({
           withHandle={false}
           // The library's double-click reset would shut the panel without closing the artifact.
           disableDoubleClick
+          disabled={handleInert}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
+            document.documentElement.setAttribute("data-chat-split-resizing", "");
             const unpin = pinBrowserPage(event.currentTarget);
             const release = () => {
               window.removeEventListener("pointerup", release);
               window.removeEventListener("pointercancel", release);
+              window.removeEventListener("blur", release);
+              window.removeEventListener("pointermove", released);
+              document.documentElement.removeAttribute("data-chat-split-resizing");
               unpin();
               rememberArtifactPanelWidth();
             };
+            const released = (move: PointerEvent) => {
+              if (move.buttons === 0) release();
+            };
             window.addEventListener("pointerup", release);
             window.addEventListener("pointercancel", release);
+            window.addEventListener("blur", release);
+            window.addEventListener("pointermove", released);
           }}
           onKeyUp={rememberArtifactPanelWidth}
           className={cn(
             "relative z-30 w-5 bg-transparent transition-[width,margin] duration-[260ms] ease-[var(--ease-out-cubic)] hover:bg-transparent hover:shadow-none active:bg-transparent active:shadow-none focus-visible:bg-transparent focus-visible:shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none",
             chatOnRight ? "-ml-4 -mr-1" : "-ml-1 -mr-4",
-            (!artifactLayoutActive || browserFullView) &&
-              "pointer-events-none -ml-0 -mr-0 w-0",
+            handleInert && "pointer-events-none -ml-0 -mr-0 w-0",
           )}
         />
         <ResizablePanel

@@ -9,6 +9,7 @@ import { gfm } from "micromark-extension-gfm";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import {
   ReasoningTranscriptIndex,
+  cachedReasoningTranscriptIndex,
   findReasoningAnchor,
   REASONING_FRAGMENT_CHARACTERS,
 } from "../src/components/assistant-ui/reasoning-transcript-index.ts";
@@ -405,4 +406,21 @@ test("a list split between items does not invent a nested continuation", () => {
       list.children.every((item) => item.children[0].type === "paragraph"),
     );
   }
+});
+
+test("a remount reuses the index it parsed before, bounded to the last eight messages", () => {
+  const first = cachedReasoningTranscriptIndex("m1");
+  assert.equal(cachedReasoningTranscriptIndex("m1"), first);
+  const source = "Earlier paragraph.\n\n```js\nconst x = 1;\n```\n\nLater paragraph.";
+  const fragments = first.update([source]);
+  const again = cachedReasoningTranscriptIndex("m1").update([source]);
+  assert.equal(again.length, fragments.length);
+  for (let i = 0; i < fragments.length; i += 1) {
+    assert.equal(again[i], fragments[i], "the same documents hand back the fragments already parsed");
+  }
+  for (let i = 2; i <= 9; i += 1) cachedReasoningTranscriptIndex(`m${i}`);
+  assert.notEqual(cachedReasoningTranscriptIndex("m1"), first, "the oldest entry was evicted");
+  const warm = cachedReasoningTranscriptIndex("m3");
+  for (let i = 10; i <= 16; i += 1) cachedReasoningTranscriptIndex(`m${i}`);
+  assert.equal(cachedReasoningTranscriptIndex("m3"), warm, "a recently used entry survives");
 });

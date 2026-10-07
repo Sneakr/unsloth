@@ -3,62 +3,175 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { HighlightResult } from "@streamdown/code";
-import type {
-  ReasoningHighlightReply,
-  ReasoningHighlightRequest,
+import { useChatRuntimeStore } from "@/features/chat";
+import { scheduleIdleTask } from "@/lib/schedule-idle-task";
+import {
+  reasoningHighlightFailure,
+  reasoningHighlightReply,
+  type ReasoningHighlightMessage,
+  type ReasoningHighlightReply,
+  type ReasoningHighlightRequest,
 } from "./reasoning-highlight";
+import {
+  mergeLineTokens,
+  type ReasoningLineTokens,
+} from "./reasoning-line-tokens";
+import { createStreamActivity, type StreamActivity } from "./stream-activity";
 
-export type ReasoningLineTokens = Map<
-  number,
-  ReasoningHighlightReply["lines"][number]["tokens"]
->;
+export type { ReasoningLineTokens } from "./reasoning-line-tokens";
 
-const lineContent = (
-  tokens: ReasoningHighlightReply["lines"][number]["tokens"],
-): string => {
-  let text = "";
-  for (const token of tokens) text += token.content;
-  return text;
-};
+export type HighlightWorkerState =
+  | "untested"
+  | "ready"
+  | "stalled"
+  | "unavailable";
+
+export type ReasoningFallbackHighlight = (
+  late: (result: HighlightResult) => void,
+) => HighlightResult | null;
+
+const READY_TIMEOUT_MS = 5_000;
+const IDLE_TEARDOWN_MS = 10_000;
+let state: HighlightWorkerState = "untested";
 let worker: Worker | null = null;
-let nextClient = 0;
+let boot: { instance: Worker; timer: ReturnType<typeof setTimeout> } | null =
+  null;
 let idle: ReturnType<typeof setTimeout> | undefined;
+let nextClient = 0;
 const listeners = new Map<number, (reply: ReasoningHighlightReply) => void>();
+const patientClients = new Set<number>();
+let activity: StreamActivity | null = null;
 
-function getWorker(): Worker | null {
+export const highlightWorkerState = (): HighlightWorkerState => state;
+
+export const streamActive = (): boolean =>
+  (activity ??= createStreamActivity(useChatRuntimeStore)).active();
+
+const clearBoot = (instance: Worker): void => {
+  if (boot?.instance !== instance) return;
+  clearTimeout(boot.timer);
+  boot = null;
+};
+
+const afterQueuedMessages = (callback: () => void): void => {
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    channel.port1.close();
+    callback();
+  };
+  channel.port2.postMessage(0);
+};
+
+const flushListeners = (spared?: ReadonlySet<number>): void => {
+  const waiting = [...listeners.keys()].filter((id) => !spared?.has(id));
+  const deliver = (): void => {
+    const id = waiting.shift();
+    if (id === undefined) return;
+    const listener = listeners.get(id);
+    if (listener !== undefined) {
+      listeners.delete(id);
+      listener(reasoningHighlightFailure(id, 0));
+    }
+    if (waiting.length > 0) setTimeout(deliver, 0);
+  };
+  if (waiting.length > 0) setTimeout(deliver, 0);
+};
+
+function fail(instance: Worker, reason: string): void {
+  if (worker !== instance) return;
+  state = "unavailable";
+  clearBoot(instance);
   if (idle) clearTimeout(idle);
+  worker = null;
+  instance.terminate();
+  console.warn(
+    "[Unsloth Code] highlight worker unavailable, highlighting on the main thread:",
+    reason,
+  );
+  flushListeners();
+}
+
+function stall(instance: Worker): void {
+  if (worker !== instance || boot?.instance !== instance) return;
+  state = "stalled";
+  console.warn(
+    "[Unsloth Code] highlight worker did not answer within",
+    READY_TIMEOUT_MS,
+    "ms, highlighting on the main thread until it does",
+  );
+  flushListeners(patientClients);
+}
+
+function getWorker(patient = false): Worker | null {
+  if (idle) clearTimeout(idle);
+  if (state === "unavailable") return null;
+  if (state === "stalled") return patient ? worker : null;
   if (worker) return worker;
-  if (typeof Worker === "undefined") return null;
+  if (typeof Worker === "undefined") {
+    state = "unavailable";
+    return null;
+  }
+  let instance: Worker;
   try {
-    worker = new Worker(
+    instance = new Worker(
       new URL("./reasoning-highlight.worker.ts", import.meta.url),
       { type: "module" },
     );
-    worker.onmessage = ({ data }: MessageEvent<ReasoningHighlightReply>) =>
-      listeners.get(data.client)?.(data);
-    worker.onerror = () => {
-      worker?.terminate();
-      worker = null;
-    };
-    return worker;
-  } catch {
+  } catch (error) {
+    state = "unavailable";
+    console.warn(
+      "[Unsloth Code] highlight worker unavailable, highlighting on the main thread:",
+      error,
+    );
     return null;
   }
+  instance.onmessage = ({ data }: MessageEvent<ReasoningHighlightMessage>) => {
+    if (instance !== worker) return;
+    if ("ready" in data) {
+      clearBoot(instance);
+      state = "ready";
+      if (listeners.size === 0) scheduleIdle();
+      return;
+    }
+    listeners.get(data.client)?.(data);
+  };
+  instance.onerror = (event) => fail(instance, event.message || event.type);
+  worker = instance;
+  boot = {
+    instance,
+    timer: setTimeout(
+      () => afterQueuedMessages(() => stall(instance)),
+      READY_TIMEOUT_MS,
+    ),
+  };
+  return instance;
+}
+
+function scheduleIdle(): void {
+  if (idle) clearTimeout(idle);
+  idle = setTimeout(() => {
+    if (!worker || boot?.instance === worker) return;
+    worker.terminate();
+    worker = null;
+  }, IDLE_TEARDOWN_MS);
 }
 
 export function requestFullHighlight(
   source: string,
   language: string | null,
-  onResult: (result: HighlightResult) => void,
+  onResult: (result: HighlightResult | null) => void,
+  speculative = false,
 ): (() => void) | null {
-  const instance = getWorker();
+  const instance = getWorker(!speculative);
   if (!instance) return null;
   const id = ++nextClient;
+  if (!speculative) patientClients.add(id);
   listeners.set(id, (reply) => {
-    if (reply.revision !== 1 || !reply.result) return;
+    if (!reply.failed && (reply.revision !== 1 || !reply.result)) return;
     listeners.delete(id);
-    onResult(reply.result);
-    if (listeners.size === 0) scheduleIdle();
+    patientClients.delete(id);
+    onResult(reply.failed ? null : (reply.result as HighlightResult));
+    if (listeners.size === 0 && worker) scheduleIdle();
   });
   const request: ReasoningHighlightRequest = {
     client: id,
@@ -67,29 +180,50 @@ export function requestFullHighlight(
     language,
     lines: [],
     full: true,
+    ...(speculative ? { speculative: true } : {}),
   };
   instance.postMessage(request);
   return () => {
     if (!listeners.has(id)) return;
     listeners.delete(id);
+    patientClients.delete(id);
     worker?.postMessage({ cancel: id });
-    if (listeners.size === 0) scheduleIdle();
+    if (listeners.size === 0 && worker) scheduleIdle();
   };
 }
 
-function scheduleIdle(): void {
-  if (idle) clearTimeout(idle);
-  idle = setTimeout(() => {
-    worker?.terminate();
-    worker = null;
-  }, 10_000);
-}
+const fallbackQueue: (() => void)[] = [];
+let fallbackPending: (() => void) | null = null;
+
+const drainFallback = (): void => {
+  fallbackPending = null;
+  if (fallbackQueue.length === 0) return;
+  if (streamActive()) {
+    const timer = setTimeout(drainFallback, 1000);
+    fallbackPending = () => clearTimeout(timer);
+    return;
+  }
+  fallbackQueue.shift()?.();
+  if (fallbackQueue.length > 0) {
+    fallbackPending = scheduleIdleTask(drainFallback, 1000);
+  }
+};
+
+const queueFallback = (job: () => void): (() => void) => {
+  fallbackQueue.push(job);
+  if (!fallbackPending) fallbackPending = scheduleIdleTask(drainFallback, 1000);
+  return () => {
+    const at = fallbackQueue.indexOf(job);
+    if (at >= 0) fallbackQueue.splice(at, 1);
+  };
+};
 
 /** Text is synchronous; expensive grammar work must never hold up chat or scrolling. */
 export function useReasoningHighlight(
   source: string,
   language: string | null,
   lines: number[],
+  fallback: ReasoningFallbackHighlight | null,
 ): ReasoningLineTokens {
   const [tokens, setTokens] = useState<ReasoningLineTokens>(() => new Map());
   const client = useRef<number | null>(null);
@@ -98,27 +232,39 @@ export function useReasoningHighlight(
   const lineKey = lines.join(",");
   useEffect(() => {
     if (lineKey === "") return;
-    const instance = getWorker();
-    if (!instance) return;
     const id = (client.current ??= ++nextClient);
     const version = ++revision.current;
-    listeners.set(id, (reply) => {
-      if (reply.revision !== version) return;
-      setTokens((previous) => {
-        const next = new Map<number, ReasoningLineTokens extends Map<number, infer T> ? T : never>();
-        let changed = next.size !== previous.size;
-        for (const { line, tokens } of reply.lines) {
-          const known = previous.get(line);
-          const kept =
-            known !== undefined && lineContent(known) === lineContent(tokens)
-              ? known
-              : tokens;
-          if (kept !== known) changed = true;
-          next.set(line, kept);
-        }
-        if (!changed && next.size === previous.size) return previous;
-        return next;
+    const wanted = lineKey.split(",").filter(Boolean).map(Number);
+    const apply = (reply: ReasoningHighlightReply) =>
+      setTokens((previous) => mergeLineTokens(previous, reply.lines));
+    const runFallback = (): (() => void) | undefined => {
+      if (!fallback) return undefined;
+      const deliver = (result: HighlightResult) => {
+        if (revision.current !== version) return;
+        apply(
+          reasoningHighlightReply(
+            { client: id, revision: version, source, language, lines: wanted },
+            result,
+          ),
+        );
+      };
+      return queueFallback(() => {
+        const now = fallback(deliver);
+        if (now) deliver(now);
       });
+    };
+    const instance = getWorker();
+    if (!instance) return runFallback();
+    let cancelFallback: (() => void) | undefined;
+    listeners.set(id, (reply) => {
+      if (reply.failed) {
+        sent.current = null;
+        if (revision.current !== version) return;
+        cancelFallback = runFallback();
+        return;
+      }
+      if (reply.revision !== version) return;
+      apply(reply);
     });
     const request: ReasoningHighlightRequest = {
       client: id,
@@ -132,23 +278,21 @@ export function useReasoningHighlight(
             }
           : source,
       language,
-      lines: lineKey.split(",").filter(Boolean).map(Number),
+      lines: wanted,
     };
     instance.postMessage(request);
     sent.current = { worker: instance, source };
-  }, [source, language, lineKey]);
+    return () => cancelFallback?.();
+  }, [source, language, lineKey, fallback]);
   useEffect(
     () => () => {
+      revision.current += 1;
       if (client.current !== null) {
         sent.current = null;
         listeners.delete(client.current);
         worker?.postMessage({ cancel: client.current });
       }
-      if (listeners.size === 0)
-        idle = setTimeout(() => {
-          worker?.terminate();
-          worker = null;
-        }, 10_000);
+      if (listeners.size === 0 && worker) scheduleIdle();
     },
     [],
   );

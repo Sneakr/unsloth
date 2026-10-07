@@ -92,8 +92,8 @@ export const TOKENIZE_LIMITS = {
 } as const;
 // An unvirtualized thread mounts every fence. Bound both their count and source
 // size; token data measured roughly 30 bytes per source character.
-const MAX_FENCES = 512;
-const MAX_CACHED_CHARACTERS = 512_000;
+export const MAX_FENCES = 512;
+export const MAX_CACHED_CHARACTERS = 512_000;
 
 // Wall-clock Date.now() can step backwards (NTP, sleep resume) and make
 // `elapsed` negative; the throttle only needs elapsed time, so stay monotonic.
@@ -123,6 +123,7 @@ type Fence = {
   lastTokenizedAt: number;
   trailing: ReturnType<typeof setTimeout> | null;
   pending: Pending | null;
+  seeded: boolean;
 };
 
 // Tokens without colors preserve the previous plain-tail rendering.
@@ -202,6 +203,15 @@ const shedsClosingRun = (shorter: string, longer: string): boolean =>
 export type UnslothCodePlugin = CodeHighlighterPlugin & {
   cached: (opts: HighlightOptions) => HighlightResult | null;
   seed: (opts: HighlightOptions, result: HighlightResult) => void;
+  highlight: (
+    opts: HighlightOptions,
+    callback?: (result: HighlightResult) => void,
+    exact?: boolean,
+  ) => HighlightResult | null;
+  highlightExact: (
+    opts: HighlightOptions,
+    callback?: (result: HighlightResult) => void,
+  ) => HighlightResult | null;
 };
 
 const fenceKeyOf = (opts: HighlightOptions): string =>
@@ -280,6 +290,20 @@ export function createCodePlugin(
     }
   };
 
+  const forkFence = (fence: Fence): Fence => {
+    const fork: Fence = {
+      ...fence,
+      lines: [...fence.lines],
+      liveTokens: null,
+      trailing: null,
+      pending: null,
+      seeded: false,
+    };
+    fences.unshift(fork);
+    cachedCharacters += fence.code.length;
+    return fork;
+  };
+
   const promote = (fence: Fence): Fence => {
     const index = fences.indexOf(fence);
     if (index > 0) {
@@ -302,6 +326,7 @@ export function createCodePlugin(
         if (fence.pending?.code === code) return promote(fence);
         continue;
       }
+      if (fence.seeded) continue;
       const anchor = fence.code;
       // A block that lost more than its closing delimiter is a different fence;
       // sharing this entry would cancel the refresh it has queued.
@@ -326,6 +351,7 @@ export function createCodePlugin(
       lastTokenizedAt: 0,
       trailing: null,
       pending: null,
+      seeded: false,
     };
     fences.unshift(fence);
     return fence;
@@ -478,7 +504,7 @@ export function createCodePlugin(
     return null;
   };
 
-  return {
+  const plugin: UnslothCodePlugin = {
     name: "shiki",
     type: "code-highlighter",
     cached: (opts) => {
@@ -503,6 +529,7 @@ export function createCodePlugin(
         lastTokenizedAt: monotonicNow(),
         trailing: null,
         pending: null,
+        seeded: true,
       };
       fences.unshift(fence);
       cachedCharacters += opts.code.length;
@@ -516,6 +543,7 @@ export function createCodePlugin(
     highlight: (
       opts: HighlightOptions,
       callback?: (result: HighlightResult) => void,
+      exact = false,
     ): HighlightResult | null => {
       const language = normalizeLanguage(opts.language);
       const themes: ThemeNames = {
@@ -559,6 +587,9 @@ export function createCodePlugin(
         evict();
         return null;
       }
+      if (exact && fence.result !== null && fence.code !== opts.code) {
+        return update(forkFence(fence), highlighter, opts.code, language, themes);
+      }
 
       const pending = fence.pending;
       if (pending && shedsClosingRun(opts.code, pending.code)) {
@@ -571,7 +602,7 @@ export function createCodePlugin(
         fence.result !== null &&
         fence.code.length >= MIN_INCREMENTAL_CHARS &&
         opts.code.length > fence.code.length;
-      if (grewLargeFence && elapsed < REFRESH_MS) {
+      if (!exact && grewLargeFence && elapsed < REFRESH_MS) {
         const result = approximateResult(fence, opts.code);
         queuePending(fence, opts.code, callback);
         fence.trailing = setTimeout(
@@ -595,5 +626,7 @@ export function createCodePlugin(
       }
       return update(fence, highlighter, opts.code, language, themes);
     },
+    highlightExact: (opts, callback) => plugin.highlight(opts, callback, true),
   };
+  return plugin;
 }

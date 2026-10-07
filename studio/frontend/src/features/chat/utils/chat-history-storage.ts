@@ -671,6 +671,7 @@ export async function getStoredChatThreadReadResult(
       bounded: options.bounded,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
+      share: true,
     });
   } catch (error) {
     if (legacyThread && !isChatThreadDeleted(legacyThread.id)) {
@@ -850,7 +851,7 @@ export async function readStoredChatMessages(
     [] as MessageRecord[],
   );
   const [backendThread, backendMessages] = await Promise.all([
-    getChatThread(threadId).catch(() => undefined),
+    getChatThread(threadId, { share: true }).catch(() => undefined),
     listChatMessages(threadId).catch((error) => {
       if (legacyMessages.length > 0) {
         return undefined;

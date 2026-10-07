@@ -26,6 +26,7 @@ export {
   unloadModel,
   notifyChatHistoryUpdated,
   removeScanFolder,
+  subscribeChatHistoryUpdated,
   revealCachedModel,
   revealFineTunedModel,
   validateModel,

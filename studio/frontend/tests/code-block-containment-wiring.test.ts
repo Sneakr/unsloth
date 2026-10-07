@@ -117,4 +117,7 @@ test("the widening anchor stops at a skipped subtree instead of forcing it to re
   const pick = GLUE.slice(GLUE.indexOf("function pickAnchorRow("), GLUE.indexOf("function sampleAnchor("));
   assert.match(pick, /anchor\.checkVisibility\(\{ contentVisibilityAuto: true \}\)/);
   assert.ok(pick.indexOf("checkVisibility") < pick.indexOf("for (const child of anchor.children)"), "checked before any child rect is read");
+  const loop = pick.slice(pick.indexOf("for (const child of anchor.children)"));
+  assert.ok(loop.indexOf("child.checkVisibility({ contentVisibilityAuto: true })") < loop.indexOf("child.getBoundingClientRect()"), "the child is asked before its rect is read, because the skipping element itself passes the check");
+  assert.match(loop, /if \(child\.checkVisibility\(\)\) return anchor;\s*continue;/, "a skipped child makes its parent the anchor; a boxless child is skipped");
 });

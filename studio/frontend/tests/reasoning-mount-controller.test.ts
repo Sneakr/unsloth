@@ -11,6 +11,18 @@ import {
   WIDEN_FRAGMENTS_PER_FRAME,
   estimateFragmentHeight,
   frameBudget,
+  buildChunkGrid,
+  chunkEndAt,
+  chunkPieces,
+  chunkStartAt,
+  addIsland,
+  mountedRanges,
+  mountPlan,
+  type MountItem,
+  NO_ISLANDS,
+  TAIL_RESERVE,
+  CHUNK_CHARACTERS,
+  CHUNK_MAX_GROUPS,
   initialRows,
   isCovered,
   widenBudget,
@@ -19,8 +31,8 @@ import {
 import {
   REASONING_ROW_CONTAINMENT,
   REASONING_ROW_CONTAINMENT_ATTRIBUTE,
-  ROW_ESTIMATE_PROPERTY,
   ROW_SETTLED_ATTRIBUTE,
+  CHUNK_ESTIMATE_PROPERTY,
   SHIP_DEFAULT,
 } from "../src/components/assistant-ui/reasoning-row-containment-mode.ts";
 import { defineContainmentFlag } from "../src/components/assistant-ui/containment-flag.ts";
@@ -110,7 +122,6 @@ test("the reasoning-row flag is a containment flag with its own names", () => {
   assert.equal(SHIP_DEFAULT, "contain");
   assert.equal(REASONING_ROW_CONTAINMENT_ATTRIBUTE, "data-reasoning-row-containment");
   assert.equal(REASONING_ROW_CONTAINMENT.global, "__UNSLOTH_REASONING_ROW_CONTAINMENT__");
-  assert.equal(ROW_ESTIMATE_PROPERTY, "--unsloth-row-estimate");
   assert.equal(ROW_SETTLED_ATTRIBUTE, "data-settled");
   assert.equal(REASONING_ROW_CONTAINMENT.resolve(undefined, ""), "contain");
   assert.equal(REASONING_ROW_CONTAINMENT.resolve(undefined, "typo"), "off");
@@ -149,5 +160,179 @@ test("the controller and flag modules are plain TypeScript", () => {
     assert.ok(!/<\/?[a-z]+[\s>]/i.test(source.replace(/^\s*[/*].*$/gm, "")), `${file}: no JSX`);
     assert.ok(!/\bfrom\s+["']react["']/.test(source), `${file}: no react import`);
     assert.ok(!source.includes("import.meta"), `${file}: no import.meta`);
+  }
+});
+
+type GridInput = { key: string; text: string; document: number; start: number; code?: { source: string; incomplete: boolean; language: string | null; lines: [] } };
+const prose = (key: string, chars: number, start = 0): GridInput => ({ key, text: "x".repeat(chars), document: 0, start });
+const code = (fence: number, line: number, chars: number): GridInput => ({
+  key: `0:0:${fence}:code:${line}:0`,
+  text: "y".repeat(chars),
+  document: 0,
+  start: fence,
+  code: { source: "", incomplete: false, language: "js", lines: [] },
+});
+
+test("the grid groups a fence's fragments, closes chunks by characters or count, and keys each by its first group", () => {
+  assert.equal(CHUNK_ESTIMATE_PROPERTY, "--unsloth-chunk-estimate");
+  assert.ok(CHUNK_CHARACTERS >= 4_096 && CHUNK_MAX_GROUPS >= 8);
+  const fragments = [prose("a", 3000), prose("b", 3000), prose("c", 3000), code(9000, 0, 2000), code(9000, 1, 2000), prose("e", 10)];
+  const grid = buildChunkGrid(fragments, fragments.map(() => 10), 8_192, 12);
+  assert.deepEqual(grid.groups.map((g) => [g.key, g.first, g.end, g.code]), [
+    ["a", 0, 1, false], ["b", 1, 2, false], ["c", 2, 3, false], ["0:9000", 3, 5, true], ["e", 5, 6, false],
+  ]);
+  assert.deepEqual(grid.chunks.map((c) => [c.key, c.first, c.end]), [["a", 0, 3], ["0:9000", 3, 6]], "a chunk takes groups until it already holds the budget");
+  assert.deepEqual([...grid.heights], [0, 10, 20, 30, 40, 50, 60]);
+  const many = Array.from({ length: 30 }, (_, i) => prose(`g${i}`, 10));
+  assert.deepEqual(buildChunkGrid(many, many.map(() => 1), 8_192, 12).chunks.map((c) => c.end - c.first), [12, 12, 6]);
+  assert.deepEqual(buildChunkGrid([], []).chunks, []);
+});
+
+test("a growing last group never moves to another chunk, and appended groups never move a boundary", () => {
+  const base = [prose("a", 6000), prose("b", 1000), prose("tail", 100)];
+  const grown = [prose("a", 6000), prose("b", 1000), prose("tail", 20_000)];
+  const key = (fragments: GridInput[]) => buildChunkGrid(fragments, fragments.map(() => 1)).chunks.map((c) => [c.key, c.first, c.end]);
+  assert.deepEqual(key(grown), key(base), "membership is decided by what the chunk held before the group");
+  const before = Array.from({ length: 18 }, (_, i) => prose(`g${i}`, 700));
+  const after = [...before, ...Array.from({ length: 7 }, (_, i) => prose(`h${i}`, 700))];
+  const a = buildChunkGrid(before, before.map(() => 1)).chunks;
+  const b = buildChunkGrid(after, after.map(() => 1)).chunks;
+  for (let i = 0; i < a.length - 1; i += 1) assert.deepEqual(b[i], a[i]);
+  assert.equal(b[a.length - 1].key, a.at(-1)!.key, "the open chunk keeps its key while it grows and when it closes");
+});
+
+test("a range cuts grid chunks into pieces whose keys stay unique and stable as the range moves", () => {
+  const fragments = [prose("p0", 3000), prose("p1", 3000), code(6000, 0, 2000), code(6000, 1, 2000), code(6000, 2, 2000), prose("p5", 3000), prose("p6", 3000)];
+  const grid = buildChunkGrid(fragments, fragments.map(() => 5), 8_192, 12);
+  const key = (at: number) => fragments[at].key;
+  const whole = chunkPieces(grid, key, 0, fragments.length);
+  assert.deepEqual(whole.map((p) => [p.key, p.first, p.end, p.whole, p.last]), grid.chunks.map((c, i) => [c.key, c.first, c.end, true, i === grid.chunks.length - 1]));
+  const prefix = chunkPieces(grid, key, 0, 3);
+  const island = chunkPieces(grid, key, 4, 7);
+  const keys = [...prefix, ...island].map((p) => p.key);
+  assert.equal(new Set(keys).size, keys.length, "a fence split by a range edge never gives two sibling chunks one key");
+  assert.equal(prefix[0].key, whole[0].key, "the piece at a chunk's start keeps the chunk's key");
+  assert.deepEqual(island[0].groups[0], { index: 2, first: 4, end: 5 }, "the cut fence keeps only its lines inside the range");
+  assert.equal(prefix.at(-1)?.whole, false, "a piece missing part of its chunk stays open");
+  const grownPrefix = chunkPieces(grid, key, 0, 4);
+  assert.deepEqual(grownPrefix.map((p) => p.key), prefix.map((p) => p.key), "a prefix growing inside a chunk keeps every key");
+});
+
+test("islands only grow, keep their identity, and stay listed after the prefix passes them", () => {
+  let islands = addIsland(NO_ISLANDS, { start: 50, end: 60 }, 10);
+  assert.deepEqual(islands, [{ id: 50, start: 50, end: 60 }]);
+  const same = addIsland(islands, { start: 52, end: 58 }, 10);
+  assert.equal(same, islands, "a covered request returns the same array, so nothing commits");
+  islands = addIsland(islands, { start: 90, end: 95 }, 10);
+  assert.deepEqual(islands, [{ id: 50, start: 50, end: 60 }, { id: 90, start: 90, end: 95 }], "a jump elsewhere keeps the rows already mounted");
+  islands = addIsland(islands, { start: 60, end: 70 }, 10);
+  assert.deepEqual(islands, [{ id: 50, start: 50, end: 70 }, { id: 90, start: 90, end: 95 }], "an adjacent request grows the island it touches");
+  islands = addIsland(islands, { start: 40, end: 92 }, 10);
+  assert.deepEqual(islands, [{ id: 50, start: 40, end: 92 }, { id: 90, start: 90, end: 95 }], "a request across two islands grows the first, and the second keeps its identity");
+  assert.equal(addIsland(islands, { start: 60, end: 94 }, 10), islands, "rows held by overlapping islands count as covered");
+  assert.equal(addIsland(islands, { start: 0, end: 20 }, 30), islands, "rows the prefix already holds are never an island");
+  assert.deepEqual(addIsland(islands, { start: 100, end: 110 }, 96), [...islands, { id: 100, start: 100, end: 110 }], "islands the prefix passed stay listed, so their spacers keep their place");
+  assert.deepEqual(addIsland(addIsland(NO_ISLANDS, { start: 5, end: 15 }, 0), { start: 5, end: 40 }, 30).map((island) => island.id), [5, 30], "an island is named by the first row it mounts, so a request clipped by the prefix cannot reuse another island's name");
+});
+
+test("mounted ranges merge the prefix with the islands and clip to the trace", () => {
+  assert.deepEqual(mountedRanges(10, NO_ISLANDS, 100), [[0, 10]]);
+  assert.deepEqual(mountedRanges(10, [{ start: 40, end: 50 }, { start: 80, end: 120 }], 100), [[0, 10], [40, 50], [80, 100]]);
+  assert.deepEqual(mountedRanges(45, [{ start: 40, end: 50 }], 100), [[0, 50]], "an island the prefix reached joins it");
+  assert.deepEqual(mountedRanges(10, [{ start: 10, end: 20 }], 100), [[0, 20]]);
+  assert.deepEqual(mountedRanges(0, [{ start: 5, end: 9 }], 100), [[5, 9]]);
+  assert.deepEqual(mountedRanges(Number.POSITIVE_INFINITY, [{ start: 5, end: 9 }], 30), [[0, 30]]);
+});
+
+test("the prefix and islands snap to whole grid chunks, so no chunk is ever split across two pieces", () => {
+  const fragments = Array.from({ length: 30 }, (_, i) => prose(`r${i}`, 1000));
+  const grid = buildChunkGrid(fragments, fragments.map(() => 1), 4_096, 12);
+  assert.deepEqual(grid.chunks.map((c) => [c.first, c.end]), [[0, 5], [5, 10], [10, 15], [15, 20], [20, 25], [25, 30]]);
+  assert.equal(chunkEndAt(grid, 0), 0);
+  assert.equal(chunkEndAt(grid, 1), 5);
+  assert.equal(chunkEndAt(grid, 5), 5);
+  assert.equal(chunkEndAt(grid, 6), 10);
+  assert.equal(chunkEndAt(grid, 30), 30);
+  assert.equal(chunkEndAt(grid, Number.POSITIVE_INFINITY), Number.POSITIVE_INFINITY);
+  assert.equal(chunkStartAt(grid, 0), 0);
+  assert.equal(chunkStartAt(grid, 7), 5);
+  assert.equal(chunkStartAt(grid, 10), 10);
+  assert.equal(chunkStartAt(grid, 30), 30);
+  const key = (at: number) => fragments[at].key;
+  const pieces = [...chunkPieces(grid, key, 0, chunkEndAt(grid, 7)), ...chunkPieces(grid, key, chunkStartAt(grid, 17), chunkEndAt(grid, 22))];
+  assert.ok(pieces.every((piece) => piece.whole), "aligned ranges only ever render whole chunks");
+  assert.deepEqual(pieces.map((piece) => piece.key), ["r0", "r5", "r15", "r20"]);
+});
+
+
+test("the mount plan gives every unmounted stretch to the island below it, or to the tail", () => {
+  assert.deepEqual(mountPlan(10, NO_ISLANDS, 100), [{ from: 0, to: 10 }, { from: 10, to: 100, reserve: TAIL_RESERVE }]);
+  assert.deepEqual(mountPlan(100, NO_ISLANDS, 100), [{ from: 0, to: 100 }, { from: 100, to: 100, reserve: TAIL_RESERVE }], "a covered trace keeps its tail spacer, at zero height");
+  const middle = [{ id: 40, start: 40, end: 50 }];
+  assert.deepEqual(mountPlan(10, middle, 100), [{ from: 0, to: 10 }, { from: 10, to: 40, reserve: "40" }, { from: 40, to: 50 }, { from: 50, to: 100, reserve: TAIL_RESERVE }]);
+  assert.deepEqual(mountPlan(60, middle, 100), [{ from: 0, to: 40 }, { from: 40, to: 40, reserve: "40" }, { from: 40, to: 60 }, { from: 60, to: 100, reserve: TAIL_RESERVE }], "a closed gap keeps its spacer where it closed");
+  const overlapping = [{ id: 50, start: 40, end: 92 }, { id: 90, start: 90, end: 95 }];
+  assert.deepEqual(mountPlan(10, overlapping, 100), [{ from: 0, to: 10 }, { from: 10, to: 40, reserve: "50" }, { from: 40, to: 90 }, { from: 90, to: 90, reserve: "90" }, { from: 90, to: 95 }, { from: 95, to: 100, reserve: TAIL_RESERVE }]);
+  assert.deepEqual(mountPlan(10, middle, 30), [{ from: 0, to: 10 }, { from: 10, to: 10, reserve: "40" }, { from: 10, to: 30, reserve: TAIL_RESERVE }], "an island the trace no longer reaches keeps its spacer, at zero height, before the tail");
+});
+
+test("a reader at the bottom gets an island while the remainder's spacer stays the same element", () => {
+  assert.deepEqual(mountPlan(8, NO_ISLANDS, 100), [{ from: 0, to: 8 }, { from: 8, to: 100, reserve: TAIL_RESERVE }]);
+  const islands = addIsland(NO_ISLANDS, { start: 90, end: 100 }, 8);
+  assert.deepEqual(mountPlan(12, islands, 100), [{ from: 0, to: 12 }, { from: 12, to: 90, reserve: "90" }, { from: 90, to: 100 }, { from: 100, to: 100, reserve: TAIL_RESERVE }], "the island and its spacer are inserted before the tail, which only shrinks");
+});
+
+const planElements = (plan: MountItem[]): string[] =>
+  plan.flatMap((item) => (item.reserve === undefined ? Array.from({ length: item.to - item.from }, (_, i) => `row:${item.from + i}`) : [`reserve:${item.reserve}`]));
+
+test("no plan step removes or reorders an element, so WebKit never lays the thread out without a spacer", () => {
+  let seed = 7;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (let trial = 0; trial < 300; trial += 1) {
+    let total = 20 + Math.floor(random() * 180);
+    let prefix = 1 + Math.floor(random() * 8);
+    let islands = NO_ISLANDS;
+    let previous = mountPlan(prefix, islands, total);
+    for (let step = 0; step < 50; step += 1) {
+      const roll = random();
+      if (roll < 0.4) prefix = Math.min(total, prefix + 1 + Math.floor(random() * 12));
+      else if (roll < 0.85) {
+        const start = Math.floor(random() * total);
+        islands = addIsland(islands, { start, end: Math.min(total, start + 1 + Math.floor(random() * 12)) }, prefix);
+      } else if (roll < 0.95) {
+        const covered = prefix >= total;
+        total += Math.floor(random() * 8);
+        if (covered) prefix = total;
+      } else {
+        total = Math.max(1, total - 1 - Math.floor(random() * 6));
+        prefix = Math.min(prefix, total);
+      }
+      const ids = islands.map((island) => island.id);
+      assert.equal(new Set(ids).size, ids.length, "island names stay unique, so no two spacers share a key");
+      for (const island of islands) assert.ok(island.start <= island.id && island.id < island.end, "an island is named by one of its own rows");
+      const plan = mountPlan(prefix, islands, total);
+      let cursor = 0;
+      for (const item of plan) {
+        assert.equal(item.from, cursor, "the plan walks the trace in order with no gap or overlap");
+        assert.ok(item.to >= item.from);
+        cursor = item.to;
+      }
+      assert.equal(cursor, total, "and accounts for every row");
+      const mounted = new Set<number>();
+      for (let row = 0; row < Math.min(prefix, total); row += 1) mounted.add(row);
+      for (const island of islands) for (let row = island.start; row < Math.min(island.end, total); row += 1) mounted.add(row);
+      const rows = plan.filter((item) => item.reserve === undefined).reduce((sum, item) => sum + item.to - item.from, 0);
+      assert.equal(rows, mounted.size, "rows are mounted exactly where the prefix and the islands reach");
+      const before = planElements(previous).filter((element) => !element.startsWith("row:") || Number(element.slice(4)) < total);
+      const after = planElements(plan);
+      const kept = new Set(after);
+      for (const element of before) assert.ok(kept.has(element), `${element} was removed by a later plan`);
+      const earlier = new Set(before);
+      assert.deepEqual(after.filter((element) => earlier.has(element)), before, "elements that stay keep their order, so none is moved");
+      previous = plan;
+    }
   }
 });

@@ -23,13 +23,24 @@ import {
   HYSTERESIS_VIEWPORTS,
   isBlankLine,
   type LineWindow,
-  lineIsWindowed,
+  type LinePins,
+  lineRendered,
+  pinBoundaryLines,
+  samePins,
   OVERSCAN_VIEWPORTS,
   plainLineText,
   selectLineWindow,
   WINDOW_CAP_LINES,
 } from "./code-fence-window";
-import { normalizeLanguage } from "./code-plugin";
+import { planPrintTokenization } from "./code-fence-print";
+import { createFenceSpeculator } from "./fence-speculation";
+import { highlightWorkerState, streamActive } from "./use-reasoning-highlight";
+import { scheduleIdleTask } from "@/lib/schedule-idle-task";
+import {
+  MAX_CACHED_CHARACTERS,
+  MAX_FENCES,
+  normalizeLanguage,
+} from "./code-plugin";
 
 /*
  * MONOTONIC fence highlighting: a fence renders as a plain shell until the first time it comes near
@@ -169,6 +180,7 @@ type FenceGate = {
   chars: number;
   /** `true` tokenizes this fence's source now; `false` only loads its grammar. */
   warm: (tokens: boolean) => void;
+  speculate: (settle: (seeded: boolean) => void) => (() => void) | null;
   latch: () => void;
   /** A state write that changes nothing, whose only job is to give React sync work to do. */
   poke: () => void;
@@ -203,6 +215,7 @@ const latchNow = (arrived: readonly FenceGate[]): void => {
   if (arrived.length === 0) return;
   for (const gate of arrived) {
     unreached.delete(gate);
+    fenceSpeculator.remove(gate);
     gate.warm(true);
   }
   flushSync(() => {
@@ -251,6 +264,7 @@ const onScroll = (event: Event): void => {
     if (gateOpen(gate)) arrived.push(gate);
   }
   latchNow(arrived);
+  fenceSpeculator.rerank();
 };
 
 const watchScrolling = (): void => {
@@ -289,6 +303,11 @@ const upgradeEverythingForPrint = (): void => {
   latchNow([...unreached]);
 };
 
+export const upgradeFencesForPrint = (): void => {
+  upgradeEverythingForPrint();
+  if (printing) tokenizeForPrint();
+};
+
 /*
  * GRAMMARS, WARMED AT IDLE, ON REAL TEXT, ONE TOKENIZATION PER TASK.
  * One fence per language, so `latchNow`'s synchronous path cannot be defeated by a still-loading
@@ -319,6 +338,9 @@ const upgradeEverythingForPrint = (): void => {
 const grammarsWarmed = new Set<string>();
 const grammarsLoaded = new Set<string>();
 let warmScheduled = false;
+
+export const grammarWarmed = (language: string | null): boolean =>
+  grammarsWarmed.has(normalizeLanguage(language ?? "text"));
 
 // Keyed the way `highlight` keys it, or `py` and `Python` are two keys for one grammar.
 const grammarOf = (gate: FenceGate): string =>
@@ -361,6 +383,42 @@ const scheduleGrammarWarm = (): void => {
   else setTimeout(warmGrammars, 500);
 };
 
+const rankGates = (gates: readonly FenceGate[]): number[] => {
+  const boxes = new Map<HTMLElement | null, DOMRect>();
+  return gates.map((gate) => {
+    let box = boxes.get(gate.outer);
+    if (box === undefined) {
+      box = gate.outer
+        ? gate.outer.getBoundingClientRect()
+        : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+      boxes.set(gate.outer, box);
+    }
+    const rect = gate.node.getBoundingClientRect();
+    if (rect.bottom < box.top) return box.top - rect.bottom;
+    if (rect.top > box.bottom) return rect.top - box.bottom;
+    return 0;
+  });
+};
+
+const SPECULATION_IN_FLIGHT = 3;
+
+const fenceSpeculator = createFenceSpeculator<FenceGate>({
+  idle: (callback, timeout) => scheduleIdleTask(callback, timeout),
+  wait: (callback, ms) => {
+    const timer = setTimeout(callback, ms);
+    return () => clearTimeout(timer);
+  },
+  enabled: () =>
+    fenceMode() !== "off" && highlightWorkerState() !== "unavailable",
+  busy: () => streamActive() || highlightWorkerState() === "stalled",
+  eligible: (gate) => grammarsWarmed.has(grammarOf(gate)),
+  rank: rankGates,
+  maxChars: MAX_HIGHLIGHT_CHARS,
+  budgetChars: MAX_CACHED_CHARACTERS / 2,
+  budgetFences: MAX_FENCES / 2,
+  maxInFlight: SPECULATION_IN_FLIGHT,
+});
+
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("beforeprint", () => {
     upgradeEverythingForPrint();
@@ -393,12 +451,25 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
  * ancestor really is clipped by the document viewport, but assuming that when a scroller exists is
  * the bug the review caught.
  */
+let scrollableNow: WeakMap<Element, boolean> | null = null;
+
+const forgetScrollable = (): void => {
+  scrollableNow = null;
+};
+
 const isScrollable = (el: HTMLElement): boolean => {
+  if (scrollableNow === null) {
+    scrollableNow = new WeakMap();
+    queueMicrotask(forgetScrollable);
+  }
+  const known = scrollableNow.get(el);
+  if (known !== undefined) return known;
   const overflowY = getComputedStyle(el).overflowY;
-  return (
+  const scrollable =
     (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay")
-    && el.scrollHeight > el.clientHeight
-  );
+    && el.scrollHeight > el.clientHeight;
+  scrollableNow.set(el, scrollable);
+  return scrollable;
 };
 
 const scrollerOf = (node: HTMLElement): HTMLElement | null => {
@@ -504,7 +575,12 @@ export function useFenceReached(
   chars: number,
   source: string,
   warm: (tokens: boolean) => void,
+  speculate: (settle: (seeded: boolean) => void) => (() => void) | null,
 ): boolean {
+  const speculateRef = useRef(speculate);
+  useEffect(() => {
+    speculateRef.current = speculate;
+  }, [speculate]);
   const [latched, setLatched] = useState(
     () =>
       streaming ||
@@ -602,6 +678,7 @@ export function useFenceReached(
       language,
       chars,
       warm: (tokens) => warmRef.current(tokens),
+      speculate: (settle) => speculateRef.current(settle),
       latch: () => setLatched(true),
       // Reuses `generation`: this fence has just latched, so every effect keyed on it
       // early-returns and the bump costs one render. See `latchNow` for why React needs the work.
@@ -610,6 +687,7 @@ export function useFenceReached(
     unreached.add(registered);
     watchScrolling();
     scheduleGrammarWarm();
+    fenceSpeculator.add(registered);
 
     // `reasoning.tsx` drops `max-h-64` when a stream ends and keeps `overflow-y-auto`, so the pane
     // stops being a scroller and its box becomes the whole trace. Watch for that and rebuild.
@@ -624,6 +702,7 @@ export function useFenceReached(
     return () => {
       for (const observer of observers) observer.disconnect();
       resize?.disconnect();
+      fenceSpeculator.remove(registered);
       unreached.delete(registered);
       unwatchScrolling();
     };
@@ -778,9 +857,11 @@ const windowedFences = new Set<() => void>();
 let windowFrame = 0;
 let windowWatched = false;
 let frameRects: Map<Element, DOMRect> | null = null;
-let frameScrollable: Map<HTMLElement, boolean> | null = null;
 let frameFlying: Map<Element | null, boolean> | null = null;
 let frameSettle = false;
+let pointerHeld: Node | null = null;
+let heldLastFrame = false;
+let frameSelection: { read: boolean; value: Selection | null } | null = null;
 const scrollerMotion = new WeakMap<Element, { top: number; at: number }>();
 const windowMotion = { top: 0, at: 0 };
 const FLYING_VIEWPORTS_PER_SECOND = 10;
@@ -794,13 +875,44 @@ const rectDuringFrame = (element: Element): DOMRect => {
   return rect;
 };
 
-const scrollableDuringFrame = (element: HTMLElement): boolean => {
-  if (frameScrollable === null) return isScrollable(element);
-  const known = frameScrollable.get(element);
-  if (known !== undefined) return known;
-  const scrollable = isScrollable(element);
-  frameScrollable.set(element, scrollable);
-  return scrollable;
+const liveSelection = (): Selection | null => {
+  const selection = document.getSelection();
+  return selection !== null && selection.rangeCount > 0 && !selection.isCollapsed
+    ? selection
+    : null;
+};
+
+const selectionDuringFrame = (): Selection | null => {
+  if (frameSelection === null) return liveSelection();
+  if (!frameSelection.read) {
+    frameSelection.read = true;
+    frameSelection.value = liveSelection();
+  }
+  return frameSelection.value;
+};
+
+const draggingDuringFrame = (body: HTMLElement): boolean => {
+  const held = pointerHeld !== null && body.contains(pointerHeld);
+  if (held) heldLastFrame = true;
+  return held;
+};
+
+const selectionBoundaryLines = (codeNode: HTMLElement, body: HTMLElement): number[] => {
+  const selection = selectionDuringFrame();
+  const lines: number[] = [];
+  for (let index = 0; selection !== null && index < selection.rangeCount; index += 1) {
+    const range = selection.getRangeAt(index);
+    for (const boundary of [range.startContainer, range.endContainer]) {
+      if (!body.contains(boundary)) continue;
+      let line: Node | null = boundary;
+      while (line !== null && line.parentNode !== codeNode) line = line.parentNode;
+      if (line === null) continue;
+      const at = Array.prototype.indexOf.call(codeNode.children, line);
+      if (at >= 0) lines.push(at);
+    }
+  }
+  if (lines.length > 0) heldLastFrame = true;
+  return lines;
 };
 
 const flyingDuringFrame = (
@@ -842,18 +954,47 @@ const flyingDuringFrame = (
  */
 let printing = false;
 
+type PrintTokenizer = { chars: number; tokenizeNow: () => boolean };
+const awaitingWorker = new Set<PrintTokenizer>();
+const PRINT_TOKENIZE_CHARS = 10 * MAX_HIGHLIGHT_CHARS;
+
+export const awaitWorker = (
+  chars: number,
+  tokenizeNow: () => boolean,
+): (() => void) => {
+  const entry: PrintTokenizer = { chars, tokenizeNow };
+  awaitingWorker.add(entry);
+  return () => {
+    awaitingWorker.delete(entry);
+  };
+};
+
+const tokenizeForPrint = (): void => {
+  if (awaitingWorker.size === 0) return;
+  const pending = [...awaitingWorker];
+  const order = planPrintTokenization(
+    pending.map((entry) => entry.chars),
+    PRINT_TOKENIZE_CHARS,
+  );
+  flushSync(() => {
+    for (const index of order) pending[index].tokenizeNow();
+  });
+};
+
 const remeasureWindows = (): void => {
   windowFrame = 0;
+  forgetScrollable();
   frameRects = new Map();
-  frameScrollable = new Map();
   frameFlying = new Map();
+  frameSelection = { read: false, value: null };
   frameSettle = false;
+  heldLastFrame = false;
   try {
     for (const measure of windowedFences) measure();
   } finally {
     frameRects = null;
-    frameScrollable = null;
     frameFlying = null;
+    frameSelection = null;
   }
   if (frameSettle && windowedFences.size > 0 && !printing) {
     windowFrame = requestAnimationFrame(remeasureWindows);
@@ -877,6 +1018,7 @@ const setPrinting = (value: boolean): void => {
     cancelAnimationFrame(windowFrame);
     windowFrame = 0;
   }
+  if (value) tokenizeForPrint();
   if (windowedFences.size === 0) return;
   flushSync(remeasureWindows);
 };
@@ -884,6 +1026,25 @@ const setPrinting = (value: boolean): void => {
 const scheduleRemeasure = (): void => {
   if (windowFrame !== 0 || windowedFences.size === 0) return;
   windowFrame = requestAnimationFrame(remeasureWindows);
+};
+
+const onPointerDown = (event: PointerEvent): void => {
+  if (event.pointerType === "touch" || event.button !== 0) return;
+  pointerHeld = event.target instanceof Node ? event.target : null;
+};
+
+const releasePointer = (): void => {
+  if (pointerHeld === null) return;
+  pointerHeld = null;
+  if (heldLastFrame) scheduleRemeasure();
+};
+
+const onPointerMove = (event: PointerEvent): void => {
+  if (pointerHeld !== null && event.buttons === 0) releasePointer();
+};
+
+const onSelectionChange = (): void => {
+  if (heldLastFrame) scheduleRemeasure();
 };
 
 const watchWindows = (): void => {
@@ -896,6 +1057,34 @@ const watchWindows = (): void => {
     passive: true,
   });
   window.addEventListener("resize", scheduleRemeasure, { passive: true });
+  document.addEventListener("pointerdown", onPointerDown, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("pointerup", releasePointer, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("pointercancel", releasePointer, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("dragend", releasePointer, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("drop", releasePointer, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("pointermove", onPointerMove, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("blur", releasePointer);
+  document.addEventListener("selectionchange", onSelectionChange, {
+    passive: true,
+  });
 };
 
 const unwatchWindows = (): void => {
@@ -905,6 +1094,16 @@ const unwatchWindows = (): void => {
   windowWatched = false;
   document.removeEventListener("scroll", scheduleRemeasure, { capture: true });
   window.removeEventListener("resize", scheduleRemeasure);
+  document.removeEventListener("pointerdown", onPointerDown, { capture: true });
+  window.removeEventListener("pointerup", releasePointer, { capture: true });
+  window.removeEventListener("pointercancel", releasePointer, { capture: true });
+  window.removeEventListener("dragend", releasePointer, { capture: true });
+  window.removeEventListener("drop", releasePointer, { capture: true });
+  window.removeEventListener("pointermove", onPointerMove, { capture: true });
+  window.removeEventListener("blur", releasePointer);
+  document.removeEventListener("selectionchange", onSelectionChange);
+  pointerHeld = null;
+  heldLastFrame = false;
   if (windowFrame !== 0) {
     cancelAnimationFrame(windowFrame);
     windowFrame = 0;
@@ -919,7 +1118,7 @@ const unwatchWindows = (): void => {
  */
 type LineWindowState =
   | { measured: false }
-  | { measured: true; window: LineWindow | null };
+  | { measured: true; window: LineWindow | null; pins: LinePins | null };
 
 const UNMEASURED: LineWindowState = { measured: false };
 
@@ -978,9 +1177,10 @@ function useLineWindow(
   frame: RefObject<HTMLElement | null>,
   lineCount: number,
   enabled: boolean,
-): LineWindow | null {
+): { window: LineWindow | null; pins: LinePins | null } {
   const [state, setState] = useState<LineWindowState>(UNMEASURED);
   const current = useRef<LineWindow | null>(null);
+  const pinned = useRef<LinePins | null>(null);
   const geometry = useRef<FenceGeometry | null>(null);
   const metricsStale = useRef(false);
   const written = useRef(-1);
@@ -997,15 +1197,16 @@ function useLineWindow(
     if (!node || !outer || !body) return;
     if (lines.current <= WINDOW_CAP_LINES && current.current === null) return;
     if (printing) {
-      if (current.current === null) return;
+      if (current.current === null && pinned.current === null) return;
       current.current = null;
-      setState({ measured: true, window: null });
+      pinned.current = null;
+      setState({ measured: true, window: null, pins: null });
       return;
     }
     let known = geometry.current;
     if (
       known === null
-      || (known.scroller !== null && !scrollableDuringFrame(known.scroller))
+      || (known.scroller !== null && !isScrollable(known.scroller))
     ) {
       known = readFenceGeometry(node, body, outer, lines.current);
     } else if (metricsStale.current) {
@@ -1018,6 +1219,7 @@ function useLineWindow(
     if (height !== written.current) {
       written.current = height;
       body.style.setProperty(FENCE_HEIGHT_PROPERTY, `${height}px`);
+      forgetScrollable();
     }
     const bounds = known.scroller === null ? null : rectDuringFrame(known.scroller);
     const viewportTop = bounds ? bounds.top : 0;
@@ -1031,6 +1233,7 @@ function useLineWindow(
       return;
     }
     if (current.current !== null && flyingDuringFrame(known.scroller, viewportHeight)) return;
+    if (current.current !== null && draggingDuringFrame(body)) return;
     const next = selectLineWindow({
       lineCount: lines.current,
       lineHeight: known.lineHeight,
@@ -1039,9 +1242,15 @@ function useLineWindow(
       viewportHeight,
       previous: current.current,
     });
-    if (next === current.current) return;
+    const pins = pinBoundaryLines(
+      selectionBoundaryLines(node, body),
+      current.current,
+      pinned.current,
+    );
+    if (next === current.current && samePins(pins, pinned.current)) return;
     current.current = next;
-    setState({ measured: true, window: next });
+    pinned.current = pins;
+    setState({ measured: true, window: next, pins });
   };
 
   useLayoutEffect(() => {
@@ -1076,10 +1285,13 @@ function useLineWindow(
     measure.current();
   }, [enabled, overCap, state.measured]);
 
-  if (!enabled) return null;
-  if (state.measured) return state.window;
-  return overCap ? EMPTY_LINE_WINDOW : null;
+  if (!enabled) return NO_WINDOW;
+  if (state.measured) return state;
+  return overCap && !printing ? EMPTY_WINDOW : NO_WINDOW;
 }
+
+const NO_WINDOW = { window: null, pins: null } as const;
+const EMPTY_WINDOW = { window: EMPTY_LINE_WINDOW, pins: null } as const;
 
 /**
  * A fence's body, highlighted, with the spans bounded to what is on screen.
@@ -1108,7 +1320,7 @@ export const FenceBody = memo(function FenceBody({
   const surface = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const tokens = result?.tokens ?? null;
-  const lineWindow = useLineWindow(
+  const { window: lineWindow, pins } = useLineWindow(
     code,
     surface,
     frame,
@@ -1168,7 +1380,7 @@ export const FenceBody = memo(function FenceBody({
               <FenceLine
                 key={index}
                 line={line}
-                windowed={lineIsWindowed(lineWindow, index)}
+                windowed={lineRendered(lineWindow, pins, index)}
               />
             ))}
           </code>

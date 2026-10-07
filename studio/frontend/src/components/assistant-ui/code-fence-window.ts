@@ -111,6 +111,38 @@ export const selectLineWindow = (geometry: WindowGeometry): LineWindow | null =>
 export const lineIsWindowed = (window: LineWindow | null, index: number): boolean =>
   window === null || (index >= window.first && index <= window.last);
 
+export type LinePin = { readonly index: number; readonly windowed: boolean };
+export type LinePins = readonly LinePin[];
+
+const pinOf = (pins: LinePins | null, index: number): boolean | undefined => {
+  if (pins === null) return undefined;
+  for (const pin of pins) if (pin.index === index) return pin.windowed;
+  return undefined;
+};
+
+export const lineRendered = (
+  window: LineWindow | null,
+  pins: LinePins | null,
+  index: number,
+): boolean => pinOf(pins, index) ?? lineIsWindowed(window, index);
+
+export const samePins = (a: LinePins | null, b: LinePins | null): boolean => {
+  if (a === b) return true;
+  if (a === null || b === null || a.length !== b.length) return false;
+  return a.every((pin, at) => pin.index === b[at].index && pin.windowed === b[at].windowed);
+};
+
+export const pinBoundaryLines = (
+  boundaries: readonly number[],
+  window: LineWindow | null,
+  previous: LinePins | null,
+): LinePins | null => {
+  const pins: LinePin[] = [];
+  for (const index of [...new Set(boundaries)].sort((x, y) => x - y))
+    pins.push({ index, windowed: pinOf(previous, index) ?? lineIsWindowed(window, index) });
+  return pins.length === 0 ? null : pins;
+};
+
 // Structurally typed rather than importing Shiki's `ThemedToken`, so a bundler-less test runner
 // can load this module.
 type LineToken = { content: string };

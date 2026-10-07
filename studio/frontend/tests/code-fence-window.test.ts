@@ -8,6 +8,9 @@ import {
   EMPTY_LINE_WINDOW,
   HYSTERESIS_VIEWPORTS,
   lineIsWindowed,
+  lineRendered,
+  pinBoundaryLines,
+  samePins,
   OVERSCAN_VIEWPORTS,
   selectLineWindow,
   WINDOW_CAP_LINES,
@@ -182,3 +185,22 @@ test("the window module is plain TypeScript", () => {
     "and no react import: this module has to load under --experimental-strip-types",
   );
 });
+
+test("a selection boundary line keeps its rendering while the window moves on", () => {
+  const before = { first: 0, last: 239 };
+  const after = { first: 300, last: 539 };
+  const pins = pinBoundaryLines([8, 8, 450], before, null);
+  assert.deepEqual(pins, [{ index: 8, windowed: true }, { index: 450, windowed: false }], "boundaries are deduplicated and keep what they were showing");
+  assert.equal(lineRendered(after, pins, 8), true, "the selected word's line stays coloured outside the new window");
+  assert.equal(lineRendered(after, pins, 450), false, "and a plain boundary stays plain inside it, so its text node survives");
+  assert.equal(lineRendered(after, pins, 400), true, "every other line follows the window");
+  assert.equal(lineRendered(after, pins, 20), false);
+  const kept = pinBoundaryLines([8], after, pins);
+  assert.deepEqual(kept, [{ index: 8, windowed: true }], "a pin carries over while its boundary stays");
+  assert.equal(pinBoundaryLines([], after, pins), null, "a cleared selection drops every pin");
+  assert.equal(samePins(kept, [{ index: 8, windowed: true }]), true);
+  assert.equal(samePins(kept, [{ index: 8, windowed: false }]), false);
+  assert.equal(samePins(null, null), true);
+  assert.equal(samePins(kept, null), false);
+});
+

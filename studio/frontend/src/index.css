@@ -4111,6 +4111,11 @@ html[data-chat-font] .aui-root {
 		transform: translateY(-50%);
 	}
 
+	:root[data-chat-split-resizing] *,
+	:root[data-chat-split-resizing] *:hover {
+		cursor: col-resize !important;
+	}
+
 	[data-slot="resizable-handle"]:hover
 		+ [data-slot="resizable-panel"]
 		.artifact-panel-shell::before,
@@ -4361,7 +4366,7 @@ html[data-chat-font] .aui-root {
 	   padding, so a header next to a paragraph reads the same as a paragraph next to a
 	   paragraph. `:where()` keeps this at zero specificity so a part that does set its own
 	   `mt-*` still wins. The first real child follows a zero-height badge anchor and gets none. */
-	:where(.aui-assistant-message-content > * + *) {
+	:where(.aui-assistant-message-content > :not(:first-child)) {
 		margin-top: calc(1rem * var(--ui-space-scale, 1));
 	}
 	:where(.aui-assistant-message-content > .h-0 + *) {
@@ -4606,16 +4611,20 @@ html[data-chat-font] .aui-root {
 		}
 	}
 
-	.aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-row] {
-		contain-intrinsic-size: auto var(--unsloth-row-estimate);
+	.aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-chunk] {
+		contain-intrinsic-size: auto var(--unsloth-chunk-estimate);
 	}
 
-	html[data-reasoning-row-containment="on"] .aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-row][data-settled] {
+	html[data-reasoning-row-containment="on"] .aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-chunk] {
+		display: flow-root;
+	}
+
+	html[data-reasoning-row-containment="on"] .aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-chunk][data-settled] {
 		content-visibility: auto;
 	}
 
 	@media print {
-		.aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-row] {
+		.aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-chunk] {
 			content-visibility: visible !important;
 			contain-intrinsic-size: none !important;
 		}

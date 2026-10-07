@@ -143,6 +143,12 @@ function pickAnchorRow(viewport: HTMLElement): Element | null {
     }
   }
   if (!anchor) return null;
+  if (
+    typeof anchor.checkVisibility === "function"
+    && !anchor.checkVisibility({ contentVisibilityAuto: true })
+  ) {
+    return anchor;
+  }
   // Then descend to the fold. A row can be taller than the viewport (a long answer with images and code usually
   // is), so a reader partway through one has the row's top ABOVE them: a block earlier in that message growing
   // moves everything they see while the row's top stays put, and a whole-row anchor reports zero. The first
@@ -154,14 +160,15 @@ function pickAnchorRow(viewport: HTMLElement): Element | null {
   // Range and a rect every frame, and not itself stable across the reflow it would measure.
   for (let depth = 0; depth < 8; depth += 1) {
     if (anchor.getBoundingClientRect().top >= fold) break;
-    if (
-      typeof anchor.checkVisibility === "function"
-      && !anchor.checkVisibility({ contentVisibilityAuto: true })
-    ) {
-      break;
-    }
     let next: Element | null = null;
     for (const child of anchor.children) {
+      if (
+        typeof child.checkVisibility === "function"
+        && !child.checkVisibility({ contentVisibilityAuto: true })
+      ) {
+        if (child.checkVisibility()) return anchor;
+        continue;
+      }
       if (child.getBoundingClientRect().bottom > fold) {
         next = child;
         break;

@@ -19,6 +19,7 @@ export function reasoningTextRange(
   root: Element,
   text: string,
   occurrence = 0,
+  range: Range = document.createRange(),
 ): Range | null {
   const nodes = textNodes(root);
   const source = nodes.map((node) => node.data).join("");
@@ -27,7 +28,6 @@ export function reasoningTextRange(
     start = source.indexOf(text, start + 1);
     if (start < 0) return null;
   }
-  const range = document.createRange();
   let offset = 0;
   let started = false;
   for (const node of nodes) {

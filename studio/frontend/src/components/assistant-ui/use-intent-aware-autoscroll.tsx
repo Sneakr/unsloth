@@ -46,6 +46,7 @@ const TOUCH_MOVE_THRESHOLD_PX = 4;
 // per-event) so slow 1px-per-event sources (middle-click autoscroll,
 // scrollbar drags, some trackpads) accumulate instead of slipping under.
 const UPWARD_DETACH_THRESHOLD_PX = 2;
+const SCROLL_KEY_WINDOW_MS = 500;
 // Window the viewport stays pinned through layout/content races. Extends on every resize/mutation,
 // so streaming keeps it pinned; settles this long after the last change.
 const FOLLOW_SETTLE_MS = 600;
@@ -219,6 +220,7 @@ export function useIntentAwareAutoScroll(): {
       let lastClientHeight = el.clientHeight;
       let upwardAccumulator = 0;
       let touchStartY = 0;
+      let scrollKeyAt = Number.NEGATIVE_INFINITY;
 
       const distanceFromBottom = (): number => {
         if (el.scrollHeight <= el.clientHeight) {
@@ -227,6 +229,7 @@ export function useIntentAwareAutoScroll(): {
         return el.scrollHeight - el.scrollTop - el.clientHeight;
       };
       let lastDistanceFromBottom = distanceFromBottom();
+      let lastScrollHeight = el.scrollHeight;
 
       const atBottomStrict = (): boolean =>
         distanceFromBottom() <= AT_BOTTOM_THRESHOLD_PX;
@@ -477,6 +480,7 @@ export function useIntentAwareAutoScroll(): {
         // effects run before it is dispatched, so resyncing here reads as zero.
         lastScrollTop = el.scrollTop;
         lastDistanceFromBottom = distanceFromBottom();
+        lastScrollHeight = el.scrollHeight;
       };
 
       const onWheel = (e: WheelEvent) => {
@@ -488,6 +492,28 @@ export function useIntentAwareAutoScroll(): {
           pendingInitialPin = false;
           detach();
         }
+      };
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (
+          e.defaultPrevented ||
+          !(
+            e.key === "ArrowUp" ||
+            e.key === "PageUp" ||
+            e.key === "Home" ||
+            (e.key === " " && e.shiftKey)
+          )
+        ) {
+          return;
+        }
+        const target = e.target instanceof HTMLElement ? e.target : null;
+        if (
+          target?.isContentEditable ||
+          target?.closest("input, textarea, select")
+        ) {
+          return;
+        }
+        scrollKeyAt = performance.now();
       };
 
       const onTouchStart = (e: TouchEvent) => {
@@ -516,6 +542,7 @@ export function useIntentAwareAutoScroll(): {
 
         const delta = scrollTop - lastScrollTop;
         const distanceNow = distanceFromBottom();
+        const scrollHeight = el.scrollHeight;
 
         // Viewport resizes can clamp scrollTop and produce spurious
         // direction signals. Only flip intent on deliberate scrolls.
@@ -540,7 +567,12 @@ export function useIntentAwareAutoScroll(): {
           // scrollTop and scrollHeight drop together and distance is unchanged. Those layout deltas
           // must not flip intent.
           const distanceDelta = distanceNow - lastDistanceFromBottom;
-          if (distanceDelta > 0) {
+          const keyed =
+            performance.now() - scrollKeyAt < SCROLL_KEY_WINDOW_MS;
+          if (
+            distanceDelta > 0 &&
+            (keyed || scrollHeight >= lastScrollHeight)
+          ) {
             upwardAccumulator += distanceDelta;
             if (upwardAccumulator >= UPWARD_DETACH_THRESHOLD_PX) {
               pendingInitialPin = false;
@@ -554,6 +586,7 @@ export function useIntentAwareAutoScroll(): {
         lastClientWidth = clientWidth;
         lastClientHeight = clientHeight;
         lastDistanceFromBottom = distanceNow;
+        lastScrollHeight = scrollHeight;
         requestTick();
       };
 
@@ -688,6 +721,9 @@ export function useIntentAwareAutoScroll(): {
       el.addEventListener("touchstart", onTouchStart, { passive: true });
       el.addEventListener("touchmove", onTouchMove, { passive: true });
       el.addEventListener("scroll", onScroll, { passive: true });
+      el.ownerDocument.addEventListener("keydown", onKeyDown, {
+        passive: true,
+      });
       // ResizeObserver covers window resizes. visualViewport.resize is the
       // only signal for iOS software-keyboard changes, where the visual
       // viewport shrinks without the element's clientHeight changing.
@@ -724,6 +760,7 @@ export function useIntentAwareAutoScroll(): {
         el.removeEventListener("touchstart", onTouchStart);
         el.removeEventListener("touchmove", onTouchMove);
         el.removeEventListener("scroll", onScroll);
+        el.ownerDocument.removeEventListener("keydown", onKeyDown);
         window.visualViewport?.removeEventListener("resize", onViewportResize);
         scrollImplRef.current = () => {
           /* no viewport mounted */

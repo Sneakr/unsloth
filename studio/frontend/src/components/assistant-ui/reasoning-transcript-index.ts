@@ -601,3 +601,23 @@ export class ReasoningTranscriptIndex {
     });
   }
 }
+
+const INDEX_CACHE_ENTRIES = 8;
+const indices = new Map<string, ReasoningTranscriptIndex>();
+
+export function cachedReasoningTranscriptIndex(
+  key: string,
+): ReasoningTranscriptIndex {
+  const known = indices.get(key);
+  if (known !== undefined) {
+    indices.delete(key);
+    indices.set(key, known);
+    return known;
+  }
+  const index = new ReasoningTranscriptIndex();
+  indices.set(key, index);
+  if (indices.size > INDEX_CACHE_ENTRIES) {
+    indices.delete(indices.keys().next().value as string);
+  }
+  return index;
+}

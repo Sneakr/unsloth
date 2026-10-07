@@ -73,6 +73,7 @@ import {
   type StreamdownProps,
 } from "streamdown";
 import {
+  awaitWorker,
   DeferredFenceShell,
   FenceBody,
   type FenceTokens,
@@ -113,6 +114,10 @@ import { useSandboxImage } from "./use-sandbox-image";
 import { rehypeSandboxImages } from "./rehype-sandbox-images";
 import { unslothDarkTheme, unslothLightTheme } from "./code-themes";
 import { stabilizeStreamingMarkdown } from "./streaming-markdown";
+import {
+  createDiscreteInputTracker,
+  type DiscreteInputTracker,
+} from "./discrete-input";
 import {
   IncrementalMarkdownCache,
   LITERAL_LINK_REMEND,
@@ -182,9 +187,16 @@ type InputPendingNavigator = Navigator & {
   };
 };
 
-const inputPending = (): boolean =>
-  (navigator as InputPendingNavigator).scheduling?.isInputPending?.() ??
-  false;
+let discreteInput: DiscreteInputTracker | null = null;
+
+const inputPending = (): boolean => {
+  const scheduling = (navigator as InputPendingNavigator).scheduling;
+  if (scheduling?.isInputPending) {
+    return scheduling.isInputPending();
+  }
+  discreteInput ??= createDiscreteInputTracker(document);
+  return discreteInput.pending();
+};
 
 const STREAMDOWN_IMMEDIATE_UPDATES = {
   duration: 0,
@@ -906,6 +918,13 @@ const fenceHighlightOptions = (body: string, languageToken: string | null) => ({
 const tokenizesOffThread = (body: string, streaming: boolean): boolean =>
   !streaming && body.length > MAX_HIGHLIGHT_CHARS;
 
+export const highlightFenceSource = (
+  body: string,
+  language: string | null,
+  late: (result: FenceTokens) => void,
+): FenceTokens | null =>
+  code.highlight(fenceHighlightOptions(body, language), late);
+
 function useFenceTokens(
   source: string,
   languageToken: string | null,
@@ -914,8 +933,10 @@ function useFenceTokens(
 ): FenceTokens | null {
   const highlight = useCallback(
     (body: string, late: (result: FenceTokens) => void) =>
-      code.highlight(fenceHighlightOptions(body, languageToken), late),
-    [languageToken],
+      streaming
+        ? code.highlight(fenceHighlightOptions(body, languageToken), late)
+        : code.highlightExact(fenceHighlightOptions(body, languageToken), late),
+    [languageToken, streaming],
   );
   const [seed] = useState<{ body: string; tokens: FenceTokens } | null>(() => {
     if (!enabled) return null;
@@ -951,25 +972,45 @@ function useFenceTokens(
       if (wanted.current === body) setTokens(result);
     };
     let cancel: (() => void) | null = null;
+    let release: (() => void) | null = null;
     let settled: FenceTokens | null = null;
     if (tokenizesOffThread(body, streaming)) {
       const options = fenceHighlightOptions(body, languageToken);
       settled = code.cached(options);
       if (settled === null) {
         cancel = requestFullHighlight(body, languageToken, (result) => {
+          if (result === null) return;
+          release?.();
+          release = null;
           if (wanted.current !== body) return;
           code.seed(options, result);
           setTokens(result);
         });
+        highlight("", () => {});
+        release = awaitWorker(body.length, () => {
+          if (highlight("", () => {}) === null) return false;
+          const result = code.highlightExact(
+            fenceHighlightOptions(body, languageToken),
+            late,
+          );
+          if (result === null) return false;
+          cancel?.();
+          setTokens(result);
+          release?.();
+          release = null;
+          return true;
+        });
       }
-      if (settled === null && cancel === null) settled = highlight(body, late);
     } else {
       settled = highlight(body, late);
     }
     // `settled === null` means the plugin caught a tokenization error; keeping the previous
     // tokens would show an older, shorter body. The callback restores them if it succeeds later.
     setTokens(settled ?? null);
-    return cancel ?? undefined;
+    return () => {
+      release?.();
+      cancel?.();
+    };
   }, [enabled, source, highlight, seed, streaming, languageToken]);
   return tokens;
 }
@@ -1059,9 +1100,33 @@ function FenceBlock({
         tokens
         && (!tokenizesOffThread(body, Boolean(isIncomplete))
           || code.cached(options) !== null);
-      code.highlight(inline ? options : fenceHighlightOptions("", languageToken), () => {});
+      if (inline && !isIncomplete) code.highlightExact(options, () => {});
+      else code.highlight(inline ? options : fenceHighlightOptions("", languageToken), () => {});
     },
     [source, languageToken, isIncomplete],
+  );
+
+  const speculate = useCallback(
+    (settle: (seeded: boolean) => void) => {
+      const body = trimTrailingNewlines(source);
+      const options = fenceHighlightOptions(body, languageToken);
+      if (code.cached(options) !== null) {
+        settle(true);
+        return null;
+      }
+      const cancel = requestFullHighlight(
+        body,
+        languageToken,
+        (result) => {
+          if (result !== null) code.seed(options, result);
+          settle(result !== null);
+        },
+        true,
+      );
+      if (cancel === null) settle(false);
+      return cancel;
+    },
+    [source, languageToken],
   );
 
   // A streaming fence is the one the reader is watching, so it never defers, and the hook latches
@@ -1074,6 +1139,7 @@ function FenceBlock({
     trimmedLength(source),
     source,
     warm,
+    speculate,
   );
 
   // MEASUREMENT ARM ONLY. See `FenceMode`: this puts the tokenizer work back while leaving the document at the

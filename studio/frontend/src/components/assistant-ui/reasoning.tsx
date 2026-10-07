@@ -478,6 +478,7 @@ function useReasoningTranscriptMode({
 function ReasoningBody({
   transcript,
   messageId,
+  roundStart,
   messageHasRenderableRenderHtmlTool,
   isStreaming,
   textClassName,
@@ -485,6 +486,7 @@ function ReasoningBody({
 }: {
   transcript: ReturnType<typeof useReasoningTranscriptMode>;
   messageId: string;
+  roundStart: number;
   messageHasRenderableRenderHtmlTool: boolean;
   isStreaming: boolean;
   textClassName?: string;
@@ -501,6 +503,7 @@ function ReasoningBody({
           key={messageId}
           initialAnchor={transcript.anchor}
           documents={transcript.documents}
+          indexKey={`${messageId}:${roundStart}`}
           messageId={messageId}
           messageHasRenderableRenderHtmlTool={
             messageHasRenderableRenderHtmlTool
@@ -598,6 +601,7 @@ const FoldedReasoningRound: ReasoningGroupComponent = ({
       <ReasoningBody
         transcript={transcript}
         messageId={messageId}
+        roundStart={startIndex}
         messageHasRenderableRenderHtmlTool={messageHasRenderableRenderHtmlTool}
         isStreaming={isStreaming}
         textClassName="pt-0"
@@ -803,6 +807,7 @@ const ReasoningGroupBlock = ({
         <ReasoningBody
           transcript={transcript}
           messageId={messageId}
+          roundStart={startIndex}
           messageHasRenderableRenderHtmlTool={
             messageHasRenderableRenderHtmlTool
           }
