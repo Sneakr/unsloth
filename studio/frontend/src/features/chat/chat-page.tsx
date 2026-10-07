@@ -594,7 +594,6 @@ const SingleContent = memo(function SingleContent({
     showResearchPanel || showArtifactPanel || showBrowserPanel;
 
   const artifactLayoutActive = showContextPanel || isArtifactPanelLayoutActive;
-  const handleInert = !artifactLayoutActive || browserFullView;
   const artifactPanelSettledOpen =
     showContextPanel &&
     isArtifactPanelLayoutActive &&
@@ -847,7 +846,7 @@ const SingleContent = memo(function SingleContent({
           withHandle={false}
           // The library's double-click reset would shut the panel without closing the artifact.
           disableDoubleClick
-          disabled={handleInert}
+          disabled={!artifactLayoutActive || browserFullView}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             document.documentElement.setAttribute("data-chat-split-resizing", "");
@@ -873,7 +872,8 @@ const SingleContent = memo(function SingleContent({
           className={cn(
             "relative z-30 w-5 bg-transparent transition-[width,margin] duration-[260ms] ease-[var(--ease-out-cubic)] hover:bg-transparent hover:shadow-none active:bg-transparent active:shadow-none focus-visible:bg-transparent focus-visible:shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none",
             chatOnRight ? "-ml-4 -mr-1" : "-ml-1 -mr-4",
-            handleInert && "pointer-events-none -ml-0 -mr-0 w-0",
+            (!artifactLayoutActive || browserFullView) &&
+              "pointer-events-none -ml-0 -mr-0 w-0",
           )}
         />
         <ResizablePanel

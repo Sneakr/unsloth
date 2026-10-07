@@ -19,12 +19,11 @@ test("the chat split never installs the library's universal cursor rule", () => 
 
 test("the handle is out of the hit test exactly while it is 0 px wide", () => {
   const page = readSrc("features/chat/chat-page.tsx");
-  assert.match(page, /const handleInert = !artifactLayoutActive \|\| browserFullView;/);
   const open = page.indexOf("<ResizableHandle");
   const handle = page.slice(open, page.indexOf("/>", open));
-  assert.match(handle, /disabled=\{handleInert\}/);
-  assert.match(handle, /handleInert && "pointer-events-none -ml-0 -mr-0 w-0"/);
-  assert.equal(/artifactLayoutActive \|\| browserFullView\) &&/.test(handle), false, "one boolean drives both the width collapse and the hit test");
+  assert.match(handle, /disabled=\{!artifactLayoutActive \|\| browserFullView\}/);
+  assert.match(handle, /\(!artifactLayoutActive \|\| browserFullView\) &&\s*"pointer-events-none -ml-0 -mr-0 w-0"/, "the width collapse and the hit test read the same condition");
+  assert.equal((handle.match(/artifactLayoutActive/g) ?? []).length, 2);
 });
 
 test("react-resizable-panels still exposes the props the fix rests on", () => {

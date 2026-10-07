@@ -2224,6 +2224,10 @@ export const Thread: FC<{
           scrollToBottomOnThreadSwitch={false}
           ref={markerRef}
           className="aui-thread-host hidden"
+          onDragEnter={onDragEnter}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
           aria-hidden={true}
         >
           {viewportEl !== null &&
