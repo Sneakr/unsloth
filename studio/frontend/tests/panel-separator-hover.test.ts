@@ -10,8 +10,8 @@ test("the chat split never installs the library's universal cursor rule", () => 
   const page = readSrc("features/chat/chat-page.tsx");
   assert.match(page, /<ResizablePanelGroup[\s\S]*?\bdisableCursor\b[\s\S]*?<ResizablePanel\b/);
   assert.equal(readSrc("index.css").includes("data-chat-split-resizing"), false, "no whole-document cursor rule: on WebKit toggling one restyles every element, 0.2-0.3 s on a long thread");
-  assert.match(page, /overlay\.style\.cssText = `position:fixed;inset:0;z-index:\$\{Z_LAYER\.DRAG_CURSOR_OVERLAY\};background:transparent;pointer-events:auto;cursor:col-resize;user-select:none;touch-action:none`;\s*document\.body\.append\(overlay\);/, "one overlay owns the cursor and the hit test, like the sidebar's drag overlay");
-  assert.match(page, /const release = \(\) => \{[\s\S]*?overlay\.remove\(\);[\s\S]*?\};/);
+  assert.match(page, /onPointerDown=\{\(event\) => \{\s*if \(event\.button !== 0\) return;\s*acquireDragOverlay\(\);/, "one overlay owns the cursor and the hit test, the same one the sidebar and Run settings drags hold");
+  assert.match(page, /const release = \(\) => \{[\s\S]*?releaseDragOverlay\(\);[\s\S]*?\};/);
   assert.match(page, /window\.addEventListener\("blur", release\);\s*window\.addEventListener\("pointermove", released\);/, "a drag whose release never reaches the page, because the window lost the pointer, still removes the overlay");
   assert.match(page, /const released = \(move: PointerEvent\) => \{\s*if \(move\.buttons === 0\) release\(\);\s*\};/, "the same buttons === 0 check react-resizable-panels uses to end its own drag");
 });
