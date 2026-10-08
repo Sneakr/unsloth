@@ -377,6 +377,9 @@ export function PanelResizeHandle({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={endDrag}
+          onLostPointerCapture={() => {
+            if (dragRef.current) endDrag()
+          }}
           onKeyDown={handleKeyDown}
           onClick={() => {
             // Switch and voice control activate by dispatching a bare click
