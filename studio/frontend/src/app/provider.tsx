@@ -58,6 +58,7 @@ import {
 import { Z_LAYER } from "@/lib/z-layers";
 import { useRouterState } from "@tanstack/react-router";
 import { setDesktopShellReady } from "./desktop-shell-ready";
+import { watchLowDeviceScale } from "./low-device-scale";
 import { MotionConfig } from "motion/react";
 import {
   type CSSProperties,
@@ -1084,6 +1085,20 @@ function AppearanceCustomizationEffect() {
   return null;
 }
 
+function LowDeviceScaleEffect() {
+  useEffect(() => {
+    const source = windowPixelRatioSource();
+    if (!source) return;
+    return watchLowDeviceScale({
+      source,
+      interfaceZoom: getAppliedInterfaceZoom,
+      subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,
+      root: document.documentElement,
+    });
+  }, []);
+  return null;
+}
+
 const REDUCED_MOTION_MAP = {
   system: "user",
   on: "always",
@@ -1109,6 +1124,7 @@ export function AppProvider({ children }: AppProviderProps) {
     <MotionConfig reducedMotion={REDUCED_MOTION_MAP[reduceMotion]}>
       <TooltipProvider>
         <AppearanceCustomizationEffect />
+        <LowDeviceScaleEffect />
         <DeepLinkHandler onOpenUrls={receiveSharedRunConfigUrls} />
         <TauriWrapper>{children}</TauriWrapper>
         <SttDownloadPrompt />

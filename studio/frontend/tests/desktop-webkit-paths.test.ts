@@ -44,6 +44,20 @@ test("the Windows thread gutter follows the native thin bar, which page zoom doe
   assert.match(readSrc("index.css"), /:root\.client-windows \{\s*--thread-scrollbar-gutter: calc\(10px \/ var\(--studio-interface-zoom, 1\)\);\s*\}/);
 });
 
+test("below 1.5x device scale the Windows thread scrolls on the compositor and keeps LCD text", () => {
+  const css = readSrc("index.css");
+  assert.match(
+    css,
+    /@media screen \{\s*:root\.client-windows\[data-low-device-scale\] \.aui-thread-viewport:not\(\.chat-full-view-dock \*\) \{\s*scrollbar-gutter: auto;\s*overflow-y: scroll;\s*border-inline-start: var\(--thread-scrollbar-gutter\) solid transparent;\s*background-color: var\(--background\);\s*\}\s*\}/,
+    "Chromium composites a scroller below 1.5x only when its scrolling background is opaque, which it paints that way only with an auto gutter; the always-on bar and the start border keep the stable both-edges geometry",
+  );
+  const supports = css.lastIndexOf("@supports selector(::-webkit-scrollbar)", css.indexOf("[data-low-device-scale]"));
+  assert.ok(supports > css.indexOf(".aui-thread-viewport {\n\t/* Reserve scrollbar space"), "the Chromium-only scrollbar block holds it, so Firefox keeps its own scrolling");
+  const provider = readSrc("app/provider.tsx");
+  assert.match(provider, /return watchLowDeviceScale\(\{\s*source,\s*interfaceZoom: getAppliedInterfaceZoom,\s*subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,\s*root: document\.documentElement,\s*\}\);/, "the desktop divides its own page zoom out, since Chromium decides on the display's scale, not the zoomed ratio");
+  assert.match(provider, /<AppearanceCustomizationEffect \/>\s*<LowDeviceScaleEffect \/>/);
+});
+
 test("without requestIdleCallback, main-thread grammar work waits for the reader and the stream", () => {
   const defer = readSrc("components/assistant-ui/code-fence-defer.tsx");
   assert.match(defer, /const warmMustWait = \(\): boolean =>\s*typeof \(globalThis as Record<string, unknown>\)\.requestIdleCallback !== "function"\s*&& \(streamActive\(\) \|\| inputQuietIn\(\) > 0\);/);

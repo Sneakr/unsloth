@@ -5276,6 +5276,15 @@ html.force-reduced-motion .sidebar-section-drop-line {
 	:root.client-windows .dark .aui-thread-viewport:hover {
 		scrollbar-color: oklch(0.72 0 0 / 0.4) transparent !important;
 	}
+
+	@media screen {
+		:root.client-windows[data-low-device-scale] .aui-thread-viewport:not(.chat-full-view-dock *) {
+			scrollbar-gutter: auto;
+			overflow-y: scroll;
+			border-inline-start: var(--thread-scrollbar-gutter) solid transparent;
+			background-color: var(--background);
+		}
+	}
 }
 
 /* An unregistered custom property always inherits, so writing
