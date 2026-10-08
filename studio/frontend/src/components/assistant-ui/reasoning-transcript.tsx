@@ -768,9 +768,10 @@ export function ReasoningTranscript({
       anchor.offset = top - rootTop;
       anchor.top = was;
       const before = scroll.scrollTop;
-      adjustAbove(Math.round(shift));
+      const rounded = Math.round(shift);
+      const acted = adjustAbove(rounded);
       const applied = scroll.scrollTop - before;
-      if (applied !== 0) {
+      if (applied !== 0 || (acted && rounded !== 0)) {
         anchor.offset -= shift - applied;
         residue = shift - applied;
       }

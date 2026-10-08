@@ -33,7 +33,7 @@ test("a print tokenizes what the worker still owes, synchronously and within a b
   const tokenize = defer.slice(defer.indexOf("const tokenizeForPrint = "), defer.indexOf("const remeasureWindows = "));
   assert.match(tokenize, /flushSync\(\(\) => \{\s*for \(const index of order\) pending\[index\]\.tokenizeNow\(\);/);
   assert.ok(defer.includes("return overCap && !printing ? EMPTY_WINDOW : NO_WINDOW;"));
-  assert.ok(defer.includes("const EMPTY_WINDOW = { window: EMPTY_LINE_WINDOW, pins: null } as const;"));
+  assert.ok(defer.includes("const EMPTY_WINDOW = { window: EMPTY_LINE_WINDOW, pins: null, measured: false } as const;"));
   const markdown = readSrc("components/assistant-ui/markdown-text.tsx");
   const hook = markdown.slice(markdown.indexOf("function useFenceTokens("), markdown.indexOf("function StreamingFenceBlock("));
   assert.equal((hook.match(/awaitWorker\(/g) ?? []).length, 1);
@@ -79,7 +79,7 @@ test("the scroller walk is memoized for one synchronous stack and nowhere longer
   for (const token of ['"auto"', '"scroll"', '"overlay"', "scrollHeight > el.clientHeight"]) {
     assert.ok(predicate.includes(token), token);
   }
-  assert.match(defer, /body\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, `\$\{height\}px`\);\s*forgetScrollable\(\);/);
+  assert.match(defer, /body\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, declared\);\s*forgetScrollable\(\);/);
   assert.match(defer, /const remeasureWindows = \(\): void => \{\s*windowFrame = 0;\s*forgetScrollable\(\);/);
   assert.equal(defer.includes("requestAnimationFrame(forgetScrollable"), false);
   assert.equal(defer.includes("frameScrollable"), false);

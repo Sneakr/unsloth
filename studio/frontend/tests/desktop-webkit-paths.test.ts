@@ -6,6 +6,21 @@ import test from "node:test";
 
 import { readSrc } from "./helpers/kit.ts";
 
+test("a fence body becomes skippable only once it carries its measured height", () => {
+  const defer = readSrc("components/assistant-ui/code-fence-defer.tsx");
+  assert.match(
+    defer,
+    /data-unsloth-fence-windowed=\{lineWindow === null \|\| !measured \? undefined : "true"\}/,
+    "a fence that upgrades off screen is first laid out as its plain lines; skipped before its height is written, it collapses, and WebKit, with no scroll anchoring, clamps a following reader's scrollTop and detaches them",
+  );
+  assert.match(defer, /const NO_WINDOW = \{ window: null, pins: null, measured: false \} as const;\s*const EMPTY_WINDOW = \{ window: EMPTY_LINE_WINDOW, pins: null, measured: false \} as const;/);
+  const measure = defer.slice(defer.indexOf("measure.current = () => {"), defer.indexOf("setState({ measured: true, window: next, pins });"));
+  assert.ok(measure.indexOf("body.style.setProperty(FENCE_HEIGHT_PROPERTY, declared);") >= 0, "the measure that first marks a fence measured writes its height before it does");
+  const autoscroll = readSrc("components/assistant-ui/use-intent-aware-autoscroll.tsx");
+  assert.match(autoscroll, /const onMutation = \(\): void => \{\s*layoutChanged = true;\s*if \(!parkIfHeld\(\)\) \{\s*extendFollow\(\);\s*\}\s*requestTick\(\);\s*\};/, "a mutation never forces layout; following stays the frame loop's job");
+  assert.match(autoscroll, /const adjustForContentInsertedAbove = useCallback\(\(deltaPx: number\) => \{\s*adjustImplRef\.current\(deltaPx\);\s*return userDetachedRef\.current;\s*\}, \[\]\);/, "the hold learns whether its correction was written, even when the engine rounded it to nothing");
+});
+
 test("a desktop zoom shows skipped content until WebKit has measured it at the new zoom", () => {
   const store = readSrc("features/settings/stores/interface-scale-store.ts");
   assert.match(store, /holdContainmentAcrossZoom\(\);\s*try \{\s*await getCurrentWebview\(\)\.setZoom\(zoom\);\s*\} finally \{\s*releaseContainmentAfterZoom\(\);\s*\}/);

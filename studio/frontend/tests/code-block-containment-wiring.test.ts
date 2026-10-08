@@ -74,13 +74,13 @@ test("the wrapper keeps the visible override and the body keeps the DOM contract
     "the flicker rule on the wrapper stays",
   );
   const body = DEFER.slice(DEFER.indexOf("export const FenceBody = memo("));
-  assert.ok(/data-streamdown="code-block-body"\s*data-unsloth-fence-windowed=\{lineWindow === null \? undefined : "true"\}\s*ref=\{surface\}/.test(body), "the body carries the window hook and the measuring ref");
+  assert.ok(/data-streamdown="code-block-body"\s*data-unsloth-fence-windowed=\{lineWindow === null \|\| !measured \? undefined : "true"\}\s*ref=\{surface\}/.test(body), "the body carries the window hook and the measuring ref");
   assert.ok(!/contentVisibility:\s*"hidden"|display:\s*"none"/.test(body), "no line may be hidden from the engine");
 });
 
 test("the component writes the measured height before paint and only when it changes", () => {
   assert.ok(DEFER.includes('import { FENCE_HEIGHT_PROPERTY } from "./code-block-containment-mode";'));
-  assert.match(DEFER, /if \(height !== written\.current\) \{\s*written\.current = height;\s*body\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, `\$\{height\}px`\);/);
+  assert.match(DEFER, /const declared = `\$\{height\}px`;\s*if \(body\.style\.getPropertyValue\(FENCE_HEIGHT_PROPERTY\) !== declared\) \{\s*body\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, declared\);/, "compared with the element's own declaration, so a body that remounts is written again");
   assert.match(DEFER, /scrollbar: Math\.max\(0, surface\.offsetHeight - surface\.clientHeight - borders\)/, "a horizontal scrollbar is part of the box the skipped body must reproduce");
   assert.match(DEFER, /const height =\s*Math\.round\(\s*\(lines\.current \* known\.lineHeight \+ known\.scrollbar\) \* measureIntrinsicScale\(body\) \* 1000,\s*\) \/ 1000;/, "scaled where WebKit lays out contain-intrinsic-size lengths without the page zoom");
   assert.match(DEFER, /contain:size;contain-intrinsic-size:0 1000px/);

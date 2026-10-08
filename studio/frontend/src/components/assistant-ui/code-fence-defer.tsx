@@ -1246,13 +1246,12 @@ function useLineWindow(
   frame: RefObject<HTMLElement | null>,
   lineCount: number,
   enabled: boolean,
-): { window: LineWindow | null; pins: LinePins | null } {
+): { window: LineWindow | null; pins: LinePins | null; measured: boolean } {
   const [state, setState] = useState<LineWindowState>(UNMEASURED);
   const current = useRef<LineWindow | null>(null);
   const pinned = useRef<LinePins | null>(null);
   const geometry = useRef<FenceGeometry | null>(null);
   const metricsStale = useRef(false);
-  const written = useRef(-1);
   const lines = useRef(lineCount);
   lines.current = lineCount;
   const hasBody = lineCount > 0;
@@ -1287,9 +1286,9 @@ function useLineWindow(
       Math.round(
         (lines.current * known.lineHeight + known.scrollbar) * measureIntrinsicScale(body) * 1000,
       ) / 1000;
-    if (height !== written.current) {
-      written.current = height;
-      body.style.setProperty(FENCE_HEIGHT_PROPERTY, `${height}px`);
+    const declared = `${height}px`;
+    if (body.style.getPropertyValue(FENCE_HEIGHT_PROPERTY) !== declared) {
+      body.style.setProperty(FENCE_HEIGHT_PROPERTY, declared);
       forgetScrollable();
     }
     const bounds = known.scroller === null ? null : rectDuringFrame(known.scroller);
@@ -1328,7 +1327,6 @@ function useLineWindow(
     if (!enabled) {
       current.current = null;
       geometry.current = null;
-      written.current = -1;
       return;
     }
     const run = () => measure.current();
@@ -1361,8 +1359,8 @@ function useLineWindow(
   return overCap && !printing ? EMPTY_WINDOW : NO_WINDOW;
 }
 
-const NO_WINDOW = { window: null, pins: null } as const;
-const EMPTY_WINDOW = { window: EMPTY_LINE_WINDOW, pins: null } as const;
+const NO_WINDOW = { window: null, pins: null, measured: false } as const;
+const EMPTY_WINDOW = { window: EMPTY_LINE_WINDOW, pins: null, measured: false } as const;
 
 /**
  * A fence's body, highlighted, with the spans bounded to what is on screen.
@@ -1391,7 +1389,7 @@ export const FenceBody = memo(function FenceBody({
   const surface = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const tokens = result?.tokens ?? null;
-  const { window: lineWindow, pins } = useLineWindow(
+  const { window: lineWindow, pins, measured } = useLineWindow(
     code,
     surface,
     frame,
@@ -1442,7 +1440,7 @@ export const FenceBody = memo(function FenceBody({
         )}
         data-language={language ?? undefined}
         data-streamdown="code-block-body"
-        data-unsloth-fence-windowed={lineWindow === null ? undefined : "true"}
+        data-unsloth-fence-windowed={lineWindow === null || !measured ? undefined : "true"}
         ref={surface}
       >
         <pre className={joinClasses(languageClass, PRE_CLASS)} style={rootStyle}>

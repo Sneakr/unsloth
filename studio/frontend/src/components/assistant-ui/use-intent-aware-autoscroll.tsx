@@ -83,7 +83,7 @@ type AutoScrollContextValue = {
    * intent bookkeeping below. A method rather than a scrollTop write at the
    * inserting commit because this hook owns scrollTop.
    */
-  adjustForContentInsertedAbove: (deltaPx: number) => void;
+  adjustForContentInsertedAbove: (deltaPx: number) => boolean;
   notifyContentResized: () => void;
 };
 
@@ -98,9 +98,7 @@ const noopContext: AutoScrollContextValue = {
   detachFromBottom: () => {
     /* no viewport mounted */
   },
-  adjustForContentInsertedAbove: () => {
-    /* no viewport mounted */
-  },
+  adjustForContentInsertedAbove: () => false,
   notifyContentResized: () => undefined,
 };
 
@@ -125,7 +123,7 @@ export function useScrollThreadToBottom(): ScrollToBottom {
 }
 
 /** See AutoScrollContextValue.adjustForContentInsertedAbove. */
-export function useAdjustForContentInsertedAbove(): (deltaPx: number) => void {
+export function useAdjustForContentInsertedAbove(): (deltaPx: number) => boolean {
   return useContext(AutoScrollContext).adjustForContentInsertedAbove;
 }
 
@@ -202,6 +200,7 @@ export function useIntentAwareAutoScroll(): {
 
   const adjustForContentInsertedAbove = useCallback((deltaPx: number) => {
     adjustImplRef.current(deltaPx);
+    return userDetachedRef.current;
   }, []);
 
   const notifyContentResized = useCallback(() => {
