@@ -3702,55 +3702,51 @@ html[data-chat-font] .aui-root {
 	   The gutters here are on the pane's width, not the window's: an artifact
 	   split can leave a 42% thread pane inside a wide window, and a viewport
 	   breakpoint would keep the full 20px there. */
-	@container (max-width: 31.5rem) {
-		.unsloth-composer-dock-inner {
-			padding-left: calc(0.75rem * var(--ui-space-scale, 1));
-			padding-right: calc(0.75rem * var(--ui-space-scale, 1));
-		}
+	:where(.aui-thread-root[data-thread-narrow]) .unsloth-composer-dock-inner {
+		padding-left: calc(0.75rem * var(--ui-space-scale, 1));
+		padding-right: calc(0.75rem * var(--ui-space-scale, 1));
+	}
 
-		/* The welcome screen is inside the viewport's own 20px gutter, so pull
-		   back to the dock's 12px rather than adding to it; otherwise the empty
-		   state is 40px narrower than the thread it turns into. */
-		.aui-thread-welcome-message {
-			padding-left: 0;
-			padding-right: 0;
-			margin-left: calc(-0.5rem * var(--ui-space-scale, 1));
-			margin-right: calc(-0.5rem * var(--ui-space-scale, 1));
-			/* w-full would pin the width and the margins would only shift the
-			   box left. An explicit width widens it into the gutter instead;
-			   auto would shrink-wrap, since the parent centres its children. */
-			width: calc(100% + 1rem * var(--ui-space-scale, 1));
-		}
+	/* The welcome screen is inside the viewport's own 20px gutter, so pull
+	   back to the dock's 12px rather than adding to it; otherwise the empty
+	   state is 40px narrower than the thread it turns into. */
+	:where(.aui-thread-root[data-thread-narrow]) .aui-thread-welcome-message {
+		padding-left: 0;
+		padding-right: 0;
+		margin-left: calc(-0.5rem * var(--ui-space-scale, 1));
+		margin-right: calc(-0.5rem * var(--ui-space-scale, 1));
+		/* w-full would pin the width and the margins would only shift the
+		   box left. An explicit width widens it into the gutter instead;
+		   auto would shrink-wrap, since the parent centres its children. */
+		width: calc(100% + 1rem * var(--ui-space-scale, 1));
+	}
 
-		.unsloth-welcome-title {
-			font-size: var(--text-2xl);
-		}
+	:where(.aui-thread-root[data-thread-narrow]) .unsloth-welcome-title {
+		font-size: var(--text-2xl);
+	}
 
-		.unsloth-welcome-sloth {
-			width: calc(2.125rem * var(--ui-space-scale, 1));
-			height: calc(2.125rem * var(--ui-space-scale, 1));
-		}
+	:where(.aui-thread-root[data-thread-narrow]) .unsloth-welcome-sloth {
+		width: calc(2.125rem * var(--ui-space-scale, 1));
+		height: calc(2.125rem * var(--ui-space-scale, 1));
+	}
 
-		.unsloth-welcome-greeting {
-			gap: calc(0.625rem * var(--ui-space-scale, 1));
-		}
+	:where(.aui-thread-root[data-thread-narrow]) .unsloth-welcome-greeting {
+		gap: calc(0.625rem * var(--ui-space-scale, 1));
 	}
 
 	/* ~300px and under: one step further, so the greeting holds a single line
 	   beside the mascot instead of wrapping over the composer. */
-	@container (max-width: 18.75rem) {
-		.unsloth-welcome-title {
-			font-size: var(--text-xl);
-		}
+	:where(.aui-thread-root[data-thread-tiny]) .unsloth-welcome-title {
+		font-size: var(--text-xl);
+	}
 
-		.unsloth-welcome-sloth {
-			width: calc(1.75rem * var(--ui-space-scale, 1));
-			height: calc(1.75rem * var(--ui-space-scale, 1));
-		}
+	:where(.aui-thread-root[data-thread-tiny]) .unsloth-welcome-sloth {
+		width: calc(1.75rem * var(--ui-space-scale, 1));
+		height: calc(1.75rem * var(--ui-space-scale, 1));
+	}
 
-		.unsloth-welcome-greeting {
-			gap: calc(0.5rem * var(--ui-space-scale, 1));
-		}
+	:where(.aui-thread-root[data-thread-tiny]) .unsloth-welcome-greeting {
+		gap: calc(0.5rem * var(--ui-space-scale, 1));
 	}
 
 	/* Right-side Thinking pill (toggle or dropdown). pl-2 matches the left
@@ -4325,7 +4321,11 @@ html[data-chat-font] .aui-root {
 		font-size: calc(0.6875rem * var(--ui-font-scale, 1));
 	}
 
-	@container (min-width: 36rem) {
+	.aui-thread-root:where([data-thread-wide]) [data-streamdown="code-block-header"] {
+		font-size: calc(0.75rem * var(--ui-font-scale, 1));
+	}
+
+	@media print {
 		.aui-thread-root [data-streamdown="code-block-header"] {
 			font-size: calc(0.75rem * var(--ui-font-scale, 1));
 		}
