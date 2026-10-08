@@ -14,6 +14,7 @@ import { approveDownload, downloadSiteOf } from "./download-approval-queue";
 import { proxiedFavicon } from "./favicon";
 import { useBrowserHistoryStore } from "./history-store";
 import { decideNativeDownload } from "./native-downloads";
+import { outsideThread } from "./outside-thread";
 import { callNative as call, nativeClearing, onNativeViewsClosed } from "./native-support";
 import { useBrowserPrefsStore } from "./prefs-store";
 import { type BrowserEntry, type BrowserTab, currentEntry, entryKey, useBrowserStore } from "./store";
@@ -291,7 +292,7 @@ function intersects(a: DOMRect, b: DOMRect): boolean {
 }
 
 function covered(rect: DOMRect): boolean {
-  for (const element of document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR)) {
+  for (const element of outsideThread(OVERLAY_SELECTOR)) {
     if (element.closest("[data-native-page]")) continue;
     if (element.querySelector('[role="tooltip"]')) continue;
     const box = element.getBoundingClientRect();
@@ -311,7 +312,7 @@ function visibleRect(element: HTMLElement): DOMRect | null {
   if (rect.width < 2 || rect.height < 2) return null;
   let bottom = rect.bottom;
   // `data-native-inset`: panel UI below the page, e.g. the annotate bar.
-  for (const dock of document.querySelectorAll<HTMLElement>(
+  for (const dock of outsideThread(
     ".chat-full-view-dock, .chat-full-view-dock-minimized, [data-native-inset]",
   )) {
     const box = dock.getBoundingClientRect();
