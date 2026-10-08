@@ -62,7 +62,7 @@ import { useIsCompact } from "@/hooks/use-mobile";
 import { useT } from "@/i18n";
 import { ChevronDownStandardIcon } from "@/lib/chevron-icons";
 import { toast } from "@/lib/toast";
-import { watchChatSettingsInset } from "@/lib/toast-offset";
+import { cornerInsets, watchChatSettingsInset } from "@/lib/toast-offset";
 import { cn } from "@/lib/utils";
 import { Edit03Icon, PanelRightIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -520,7 +520,7 @@ export function ChatSettingsPanel({
   useEffect(() => {
     if (!open || isCompact) return;
     return watchChatSettingsInset(
-      document.documentElement,
+      cornerInsets,
       asideRef.current,
       settingsWidth * settingsScale,
       uiSpaceScale,

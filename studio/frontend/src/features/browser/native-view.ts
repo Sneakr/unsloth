@@ -8,7 +8,7 @@ import type { TranslationKey } from "@/i18n";
 import type { InterpolationValues } from "@/i18n";
 import { openExternalLink } from "@/lib/open-link";
 import { toast } from "@/lib/toast";
-import { BROWSER_PAGE_INSET_VAR, CHAT_SETTINGS_INSET_VAR } from "@/lib/toast-offset";
+import { BROWSER_PAGE_INSET_VAR, CHAT_SETTINGS_INSET_VAR, cornerInsets } from "@/lib/toast-offset";
 import { hostOf } from "./address";
 import { approveDownload, downloadSiteOf } from "./download-approval-queue";
 import { proxiedFavicon } from "./favicon";
@@ -334,7 +334,7 @@ let toastInset: string | null = null;
 
 // native views cover DOM toasts, so reserve a left column when the page reaches the right edge or Run settings.
 function insetToasts(rect: DOMRect | null): void {
-  const style = document.documentElement.style;
+  const style = cornerInsets.style;
   // read the inline value set by watchChatSettingsInset; it is absent when the panel is closed or the row is narrow.
   const settings = Number.parseFloat(style.getPropertyValue(CHAT_SETTINGS_INSET_VAR)) || 0;
   const room = rect && rect.right >= window.innerWidth - settings - 2 && rect.left >= TOAST_COLUMN;
