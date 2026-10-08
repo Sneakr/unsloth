@@ -4630,6 +4630,13 @@ html[data-chat-font] .aui-root {
 		contain-intrinsic-size: auto var(--unsloth-fence-height);
 	}
 
+	html[data-interface-zooming] .aui-thread-root [data-slot="reasoning-transcript"] > [data-reasoning-chunk],
+	html[data-interface-zooming] .aui-thread-root [data-streamdown="code-block-body"][data-unsloth-fence-windowed],
+	html[data-interface-zooming] .aui-thread-root .aui-math-block,
+	html[data-interface-zooming] .aui-thread-root .aui-math-display {
+		content-visibility: visible !important;
+	}
+
 	@media print {
 		.aui-thread-root [data-streamdown="code-block-body"] {
 			content-visibility: visible !important;
@@ -5259,6 +5266,10 @@ html.force-reduced-motion .sidebar-section-drop-line {
 }
 
 @supports selector(::-webkit-scrollbar) {
+	:root.client-windows {
+		--thread-scrollbar-gutter: calc(10px / var(--studio-interface-zoom, 1));
+	}
+
 	:root.client-windows .aui-thread-viewport {
 		scrollbar-width: thin;
 		scrollbar-color: transparent transparent !important;

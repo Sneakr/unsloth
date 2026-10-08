@@ -36,6 +36,7 @@ export function subscribeAppliedInterfaceZoom(listener: () => void): () => void 
 
 export function setAppliedInterfaceZoom(zoom: number): void {
   appliedInterfaceZoom = zoom;
+  document.documentElement.style.setProperty("--studio-interface-zoom", String(zoom));
   document.documentElement.style.setProperty(
     "--studio-native-titlebar-height",
     `${NATIVE_MAC_TITLEBAR_HEIGHT_PX / zoom}px`,

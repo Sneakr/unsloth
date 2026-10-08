@@ -1134,6 +1134,26 @@ type FenceGeometry = FenceMetrics & {
 
 const linePitches = new Map<string, number>();
 const PITCH_PROBE_LINES = 64;
+let intrinsicScale = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener("resize", () => {
+    intrinsicScale = 0;
+  });
+}
+
+const measureIntrinsicScale = (surface: HTMLElement): number => {
+  if (intrinsicScale > 0) return intrinsicScale;
+  const probe = document.createElement("div");
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText =
+    "position:absolute;visibility:hidden;pointer-events:none;top:0;left:0;width:0;contain:size;contain-intrinsic-size:0 1000px";
+  surface.before(probe);
+  const height = probe.getBoundingClientRect().height;
+  probe.remove();
+  if (!(height > 0)) return 1;
+  intrinsicScale = Math.round(1000000 / height) / 1000;
+  return intrinsicScale;
+};
 
 const measureLinePitch = (surface: HTMLElement): number => {
   const parent = surface.parentElement;
@@ -1144,6 +1164,7 @@ const measureLinePitch = (surface: HTMLElement): number => {
     context.lineHeight,
     getComputedStyle(document.documentElement).getPropertyValue("--custom-code-font-size"),
     window.devicePixelRatio,
+    measureIntrinsicScale(surface),
   ].join("|");
   const known = linePitches.get(key);
   if (known !== undefined) return known;
@@ -1255,7 +1276,9 @@ function useLineWindow(
     metricsStale.current = false;
     geometry.current = known;
     const height =
-      Math.round((lines.current * known.lineHeight + known.scrollbar) * 1000) / 1000;
+      Math.round(
+        (lines.current * known.lineHeight + known.scrollbar) * measureIntrinsicScale(body) * 1000,
+      ) / 1000;
     if (height !== written.current) {
       written.current = height;
       body.style.setProperty(FENCE_HEIGHT_PROPERTY, `${height}px`);

@@ -211,6 +211,10 @@ test("the popup keeps one on-screen size and does not dismiss a modal", () => {
   );
   assert.match(zoom, /if \(!isTauri \|\| mac\) return;\s*event\.preventDefault\(\);/);
   assert.match(zoom, /window\.addEventListener\("wheel", onWheel, \{ passive: false \}\)/);
+  assert.match(zoom, /const syncWheel = \(\) => \{\s*if \(modifierHeld \|\| pointerInScope\) armWheel\(\);\s*else disarmWheel\(\);\s*\};/, "off macOS the blocking listener is armed while Ctrl/Meta is held or the pointer is over a zoom scope, so a pinch, which arrives as Ctrl+wheel with no keydown, still reaches the scope");
+  assert.match(zoom, /pointerInScope = zoomScopeFor\(event\.target\) !== null;/);
+  assert.match(zoom, /window\.addEventListener\("pointerover", onPointerOver, true\);/);
+  assert.match(zoom, /window\.removeEventListener\("pointerover", onPointerOver, true\);/);
   // Below the shortcut recorder's window capture listener, so recording Mod+= does not zoom.
   assert.match(zoom, /document\.addEventListener\("keydown", onKeyDown, true\)/);
   assert.match(

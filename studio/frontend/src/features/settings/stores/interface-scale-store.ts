@@ -126,6 +126,29 @@ export function webInterfaceScaleFactor(scale: number): number {
   return isTauri ? 1 : interfaceScaleToZoom(scale);
 }
 
+const ZOOMING_ATTRIBUTE = "data-interface-zooming";
+const ZOOMING_RELEASE_MS = 300;
+const holdsContainmentAcrossZoom = !(
+  typeof navigator !== "undefined" && navigator.userAgent.includes("Windows")
+);
+let zoomingRelease: ReturnType<typeof setTimeout> | null = null;
+
+function holdContainmentAcrossZoom(): void {
+  if (!holdsContainmentAcrossZoom) return;
+  if (zoomingRelease !== null) clearTimeout(zoomingRelease);
+  zoomingRelease = null;
+  document.documentElement.setAttribute(ZOOMING_ATTRIBUTE, "");
+}
+
+function releaseContainmentAfterZoom(): void {
+  if (!holdsContainmentAcrossZoom) return;
+  if (zoomingRelease !== null) clearTimeout(zoomingRelease);
+  zoomingRelease = setTimeout(() => {
+    zoomingRelease = null;
+    document.documentElement.removeAttribute(ZOOMING_ATTRIBUTE);
+  }, ZOOMING_RELEASE_MS);
+}
+
 export function applyInterfaceScale(scale: number): Promise<void> {
   if (!isTauri) {
     applyWebInterfaceScale(scale);
@@ -139,7 +162,12 @@ export function applyInterfaceScale(scale: number): Promise<void> {
     }
     const { getCurrentWebview } = await import("@tauri-apps/api/webview");
     const zoom = interfaceScaleToZoom(nextScale);
-    await getCurrentWebview().setZoom(zoom);
+    holdContainmentAcrossZoom();
+    try {
+      await getCurrentWebview().setZoom(zoom);
+    } finally {
+      releaseContainmentAfterZoom();
+    }
     if (nextScale !== requestedInterfaceScale) {
       // a timed-out command can overwrite a newer native zoom when it finishes.
       appliedInterfaceScale = null;
@@ -175,6 +203,7 @@ export function applyInterfaceScaleBeforeFirstPaint(
       // settle, and everything after it waits behind that. Cut it loose or the retry in
       // `provider.tsx` and every later scale change are dead until restart.
       interfaceScaleApplicationQueue = Promise.resolve();
+      releaseContainmentAfterZoom();
       resolve();
     }, timeoutMs);
     void applied.finally(() => {
