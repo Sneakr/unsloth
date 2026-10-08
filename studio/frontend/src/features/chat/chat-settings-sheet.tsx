@@ -409,11 +409,6 @@ function CollapsibleSection({
 interface ChatSettingsPanelProps {
   open: boolean;
   onOpenChange?: (open: boolean) => void;
-  params: InferenceParams;
-  onParamsChange: (
-    params: InferenceParams,
-    options?: { minPChoiceEdited?: boolean },
-  ) => void;
   modelConfig?: ReactNode;
   isExternalModel?: boolean;
   /** Sampling-param capabilities for the active external provider, or `null` for local models
@@ -485,8 +480,6 @@ function specFallbackMessage({
 export function ChatSettingsPanel({
   open,
   onOpenChange,
-  params,
-  onParamsChange,
   modelConfig = null,
   isExternalModel = false,
   providerCapabilities = null,
@@ -496,6 +489,8 @@ export function ChatSettingsPanel({
 }: ChatSettingsPanelProps) {
   const asideRef = useRef<HTMLElement>(null);
   const t = useT();
+  const params = useChatRuntimeStore((s) => s.params);
+  const setParams = useChatRuntimeStore((s) => s.setParams);
   const {
     width: settingsWidth,
     max: settingsMax,
@@ -880,7 +875,7 @@ export function ChatSettingsPanel({
         ? getPresetSource(activePreset)
         : "modified";
       setActivePresetSource(nextSource);
-      onParamsChange(nextParams, {
+      setParams(nextParams, {
         minPChoiceEdited: key === "minP" || key === "minPMode",
       });
     };
@@ -907,14 +902,14 @@ export function ChatSettingsPanel({
       ? getPresetSource(activePreset)
       : "modified";
     setActivePresetSource(nextSource);
-    onParamsChange(nextParams);
+    setParams(nextParams);
   }, [
     activeExternalProvider,
     activePreset,
     activePresetBaseline,
     isExternalModel,
     maxTokensMax,
-    onParamsChange,
+    setParams,
     params,
     settingsHydrated,
     setActivePresetSource,
@@ -939,7 +934,7 @@ export function ChatSettingsPanel({
     }
     const p = presets.find((pr) => pr.name === name);
     if (p) {
-      onParamsChange(applyPresetParamsWithinCurrentLimits(p), {
+      setParams(applyPresetParamsWithinCurrentLimits(p), {
         minPChoiceEdited: true,
       });
       if (p.loadConfig) {
@@ -1001,7 +996,7 @@ export function ChatSettingsPanel({
     setCustomPresets(next);
     if (activePreset === name) {
       if (fallbackPreset) {
-        onParamsChange(
+        setParams(
           applyPresetParamsWithinCurrentLimits(fallbackPreset),
           { minPChoiceEdited: true },
         );
@@ -1040,7 +1035,7 @@ export function ChatSettingsPanel({
       ? getPresetSource(activePreset)
       : "modified";
     setActivePresetSource(nextSource);
-    onParamsChange(nextParams);
+    setParams(nextParams);
     setSystemPromptEditorOpen(false);
   }
 

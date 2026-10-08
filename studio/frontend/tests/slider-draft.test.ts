@@ -158,3 +158,12 @@ test("what an owner shows beside its slider follows the drag", () => {
   assert.match(music, /onDraft=\{setDraggedExtendS\}/);
   assert.match(music, /tailS=\{action === "extend" \? \(draggedExtendS \?\? draft\.extendS\) : 0\}/, "the extend tail stopped growing while Add seconds was dragged");
 });
+
+test("a sampling change re-renders the Run settings panel, not the chat page", () => {
+  const page = readSrc("features/chat/chat-page.tsx");
+  assert.match(page, /const inferenceCheckpoint = useChatRuntimeStore\(\s*\(state\) => state\.params\.checkpoint,\s*\);/);
+  for (const file of ["features/chat/chat-page.tsx", "features/chat/hooks/use-chat-model-runtime.ts"]) {
+    assert.doesNotMatch(readSrc(file), /useChatRuntimeStore\(\(\w+\) => \w+\.params\)/, `${file} re-rendered the whole chat page for every sampling change`);
+  }
+  assert.match(readSrc("features/chat/chat-settings-sheet.tsx"), /const params = useChatRuntimeStore\(\(s\) => s\.params\);/);
+});
