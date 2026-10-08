@@ -52,6 +52,7 @@ import {
 import { RetrievalSettingsSection } from "@/features/rag";
 import { useLlamaUpdateCheck } from "@/hooks/use-llama-update-check";
 import { useScrollFades } from "@/hooks/use-scroll-fades";
+import { useSliderDraft } from "@/hooks/use-slider-draft";
 import { useUiSpaceScale } from "@/hooks/use-ui-space-scale";
 import {
   CHAT_SETTINGS_WIDTH_MIN,
@@ -165,7 +166,8 @@ export function ParamSlider({
   max,
   step,
   onChange,
-  displayValue,
+  onDraft,
+  format,
   info,
   valueSize,
   disabled,
@@ -177,13 +179,20 @@ export function ParamSlider({
   max: number;
   step: number;
   onChange: (v: number) => void;
-  displayValue?: string;
+  onDraft?: (value: number | null) => void;
+  format?: (value: number) => string | undefined;
   info?: ReactNode;
   valueSize?: number;
   disabled?: boolean;
   /** Label, track and value on one row, for narrow settings columns. */
   inline?: boolean;
 }) {
+  const { draft, sliderProps } = useSliderDraft(
+    value,
+    (v) => onChange(snapToStep(v, step, min, max)),
+    onDraft,
+  );
+  const shown = draft ?? value;
   if (inline) {
     return (
       <div className="flex items-center gap-3">
@@ -198,18 +207,17 @@ export function ParamSlider({
           min={min}
           max={max}
           step={step}
-          value={[value]}
-          onValueChange={([v]) => onChange(snapToStep(v, step, min, max))}
+          {...sliderProps}
           className="panel-slider min-w-0 flex-1"
           disabled={disabled}
         />
         <NumericValueInput
-          value={value}
+          value={shown}
           min={min}
           max={max}
           step={step}
           onChange={onChange}
-          displayValue={displayValue}
+          displayValue={format?.(shown)}
           ariaLabel={label}
           size={valueSize ?? 4}
           className="panel-number-input"
@@ -228,12 +236,12 @@ export function ParamSlider({
           {info && <InfoHint>{info}</InfoHint>}
         </div>
         <NumericValueInput
-          value={value}
+          value={shown}
           min={min}
           max={max}
           step={step}
           onChange={onChange}
-          displayValue={displayValue}
+          displayValue={format?.(shown)}
           ariaLabel={label}
           size={valueSize ?? 4}
           className="panel-number-input"
@@ -244,8 +252,7 @@ export function ParamSlider({
         min={min}
         max={max}
         step={step}
-        value={[value]}
-        onValueChange={([v]) => onChange(snapToStep(v, step, min, max))}
+        {...sliderProps}
         className="panel-slider"
         disabled={disabled}
       />
@@ -1532,7 +1539,7 @@ export function ChatSettingsPanel({
                 max={1}
                 step={0.05}
                 onChange={set("topP")}
-                displayValue={params.topP === 1 ? "Off" : undefined}
+                format={(v) => (v === 1 ? "Off" : undefined)}
                 info="Nucleus sampling. Restricts choices to the smallest set of tokens whose cumulative probability reaches this threshold. 1.0 = off."
               />
             ) : null}
@@ -1544,7 +1551,7 @@ export function ChatSettingsPanel({
                 max={100}
                 step={1}
                 onChange={set("topK")}
-                displayValue={params.topK === 0 ? "Off" : undefined}
+                format={(v) => (v === 0 ? "Off" : undefined)}
                 info="Limits sampling to the K most likely tokens at each step. 0 = off."
               />
             ) : null}
@@ -1597,9 +1604,7 @@ export function ChatSettingsPanel({
                 max={2}
                 step={0.05}
                 onChange={set("repetitionPenalty")}
-                displayValue={
-                  params.repetitionPenalty === 1 ? "Off" : undefined
-                }
+                format={(v) => (v === 1 ? "Off" : undefined)}
                 info="Down-weights tokens that have already appeared, reducing repetition. 1.0 = off; higher values penalize more strongly."
               />
             ) : null}
@@ -1611,9 +1616,7 @@ export function ChatSettingsPanel({
                 max={2}
                 step={0.1}
                 onChange={set("presencePenalty")}
-                    displayValue={
-                      params.presencePenalty === 0 ? "Off" : undefined
-                    }
+                format={(v) => (v === 0 ? "Off" : undefined)}
                 info="Penalizes any token that has already appeared at least once, encouraging the model to introduce new topics. 0 = off."
               />
             ) : null}
@@ -1628,10 +1631,8 @@ export function ChatSettingsPanel({
               max={maxTokensMax}
               step={64}
               onChange={set("maxTokens")}
-              displayValue={
-                !isExternalModel && params.maxTokens >= maxTokensMax
-                  ? "Max"
-                  : undefined
+              format={(v) =>
+                !isExternalModel && v >= maxTokensMax ? "Max" : undefined
               }
               info="Maximum number of tokens to generate per response. Generation stops at this limit or when the model emits an end-of-sequence token."
             />
@@ -1941,9 +1942,7 @@ function MaxToolCallsSlider() {
       max={41}
       step={1}
       onChange={(v) => setMaxToolCalls(v >= 41 ? 9999 : v)}
-      displayValue={
-        sliderValue >= 41 ? "Max" : sliderValue === 0 ? "Off" : undefined
-      }
+      format={(v) => (v >= 41 ? "Max" : v === 0 ? "Off" : undefined)}
       info="Cap on tool/function calls the model may invoke within a single response. 0 disables tool use; Max removes the cap."
     />
   );
@@ -1956,13 +1955,6 @@ function ToolCallTimeoutSlider() {
   // Slider 1-31; 31 maps to 9999 ("Max")
   const sliderValue = timeout >= 9999 ? 31 : Math.min(Math.max(timeout, 1), 30);
 
-  const displayValue =
-    sliderValue >= 31
-      ? "Max"
-      : sliderValue === 1
-        ? "1 minute"
-        : `${sliderValue} minutes`;
-
   return (
     <ParamSlider
       label="Max Tool Call Duration"
@@ -1971,7 +1963,9 @@ function ToolCallTimeoutSlider() {
       max={31}
       step={1}
       onChange={(v) => setTimeout_(v >= 31 ? 9999 : v)}
-      displayValue={displayValue}
+      format={(v) =>
+        v >= 31 ? "Max" : v === 1 ? "1 minute" : `${v} minutes`
+      }
       valueSize={10}
       info="Per-call wall-clock limit. Long-running tool executions are terminated when this elapses; the model continues with what completed."
     />
