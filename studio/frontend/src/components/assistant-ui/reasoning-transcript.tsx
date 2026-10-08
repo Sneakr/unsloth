@@ -67,6 +67,7 @@ import {
 } from "./reasoning-row-containment-mode";
 import { createSettleQueue } from "./reasoning-settle-queue";
 import { hasPendingProgressiveMounts } from "./progressive-messages";
+import { panelDragInProgress } from "@/components/ui/panel-drag-overlay";
 import { cn } from "@/lib/utils";
 
 type Reserve = { element: HTMLDivElement; from: number; to: number };
@@ -881,6 +882,10 @@ export function ReasoningTranscript({
     let settleTimer = 0;
     const resettleLater = () => {
       settleTimer = 0;
+      if (panelDragInProgress()) {
+        settleTimer = window.setTimeout(resettleLater, RESETTLE_DELAY_MS);
+        return;
+      }
       resettleRows(element);
       const next = measureGeometry(element);
       if (next) setGeometry(keepGeometry(next));
