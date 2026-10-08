@@ -21,10 +21,14 @@ const CLOSED_DECORATION_PATTERN = /<\/div>\s*\)\}\s*$/;
 const DIALOG_SURFACE_CLASSES =
   /<(?:DialogContent|AlertDialogContent|CommandDialog)\b(?:[^>]|=>)*?\bclassName="([^"]*)"/g;
 const WHOLE_WINDOW_CENTRE = /(?:^|\s)(?:max-sm:)?top-1\/2(?:\s|$)/;
-const DIRECT_VIEWPORT_BACKDROP_PATTERN =
-  /body:has\(> \[data-viewport-backdrop="true"\]\[data-state="open"\]\)/;
-const DESCENDANT_VIEWPORT_BACKDROP_PATTERN =
-  /body:has\(\[data-viewport-backdrop="true"\]\[data-state="open"\]\)/;
+const DOCUMENT_ROOT_HAS_PATTERN =
+  /(?:^|[\s,{}(>~+])(?:html|body|:root)(?:\[[^\]]*\]|\.[\w-]+|#[\w-]+)*:has\(/m;
+const TITLEBAR_BACKDROP_RULE_PATTERN =
+  /\[data-slot="window-titlebar"\]\[data-viewport-backdrop-open\]::after\s*\{\s*opacity:\s*1;\s*\}/;
+const TITLEBAR_BACKDROP_STORE_PATTERN =
+  /useSyncExternalStore\(\s*enabled \? subscribeViewportBackdrop : subscribeNever,/;
+const TITLEBAR_BACKDROP_ATTRIBUTE_PATTERN =
+  /data-slot="window-titlebar"\s+data-viewport-backdrop-open=\{backdropOpen \? "" : undefined\}/;
 const TOUR_VIEWPORT_BACKDROP_PATTERN =
   /data-slot="dialog-overlay"[\s\S]*?data-viewport-backdrop=\{true\}/;
 
@@ -100,13 +104,16 @@ test("dialogs that set their own top still centre below the window chrome", () =
   assert.ok(checked > 10, `only ${checked} dialog surfaces matched`);
 });
 
-test("viewport titlebar effects stay mutation-scoped and cover custom modal chrome", async () => {
-  const [styles, tour] = await Promise.all([
+test("the titlebar dims for viewport backdrops without a :has() on the document root", async () => {
+  const [styles, titlebar, tour] = await Promise.all([
     readSrc("index.css"),
+    readSrc("components/tauri/window-titlebar.tsx"),
     readSrc("features/tour/components/guided-tour.tsx"),
   ]);
 
-  assert.match(styles, DIRECT_VIEWPORT_BACKDROP_PATTERN);
-  assert.doesNotMatch(styles, DESCENDANT_VIEWPORT_BACKDROP_PATTERN);
+  assert.doesNotMatch(styles, DOCUMENT_ROOT_HAS_PATTERN);
+  assert.match(styles, TITLEBAR_BACKDROP_RULE_PATTERN);
+  assert.match(titlebar, TITLEBAR_BACKDROP_STORE_PATTERN);
+  assert.match(titlebar, TITLEBAR_BACKDROP_ATTRIBUTE_PATTERN);
   assert.match(tour, TOUR_VIEWPORT_BACKDROP_PATTERN);
 });

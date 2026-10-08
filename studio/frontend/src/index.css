@@ -21,8 +21,7 @@
 	   and page navigation. Window controls paint above it, keeping their glyphs
 	   and hover feedback sharp without changing hit testing.
 	   Only viewport backdrops participate; a panel-local dialog or a menu must
-	   not dim the window chrome. :has also keeps stacked modals correct without
-	   a separate counter or document-wide MutationObserver. */
+	   not dim the window chrome. */
 	[data-slot="window-titlebar"]::after {
 		content: "";
 		position: absolute;
@@ -35,8 +34,7 @@
 		opacity: 0;
 		transition: opacity 100ms;
 	}
-	body:has(> [data-viewport-backdrop="true"][data-state="open"])
-		[data-slot="window-titlebar"]::after {
+	[data-slot="window-titlebar"][data-viewport-backdrop-open]::after {
 		opacity: 1;
 	}
 

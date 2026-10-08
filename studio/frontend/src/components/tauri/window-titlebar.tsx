@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import {
+  getViewportBackdropOpen,
+  subscribeViewportBackdrop,
+} from "@/components/tauri/viewport-backdrop";
 import { useIsMobileShell } from "@/hooks/use-mobile";
 import { useSidebarPin } from "@/hooks/use-sidebar-pin";
 import { useSidebarWidth } from "@/hooks/use-sidebar-width";
@@ -20,9 +24,18 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 const CUSTOM_TITLEBAR_PLATFORMS = ["win", "linux", "x11"] as const;
+
+function subscribeNever(): () => void {
+  return () => undefined;
+}
+
+function backdropClosed(): boolean {
+  return false;
+}
 
 type WindowResizeDirection =
   | "East"
@@ -286,6 +299,11 @@ export function WindowTitlebar({
   const [enabled] = useState(shouldUseCustomWindowTitlebar);
   const [maximized, setMaximized] = useState(false);
   const [focused, setFocused] = useState(true);
+  const backdropOpen = useSyncExternalStore(
+    enabled ? subscribeViewportBackdrop : subscribeNever,
+    enabled ? getViewportBackdropOpen : backdropClosed,
+    backdropClosed,
+  );
   const { pinned, togglePinned } = useSidebarPin();
   // Outside SidebarProvider, so read the same media query the provider does.
   const isMobile = useIsMobileShell();
@@ -478,6 +496,7 @@ export function WindowTitlebar({
         )}
         data-titlebar-live-width-scope=""
         data-slot="window-titlebar"
+        data-viewport-backdrop-open={backdropOpen ? "" : undefined}
         aria-label="Window titlebar"
       >
         {showSidebarSurface && (
