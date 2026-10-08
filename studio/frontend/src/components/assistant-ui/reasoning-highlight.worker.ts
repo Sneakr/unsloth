@@ -21,7 +21,7 @@ const revisions = new Map<number, number>();
 const sources = new Map<number, string>();
 let scheduled = false;
 
-self.onmessage = ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
+self.onmessage ??= ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
   if ("cancel" in data) {
     pending.delete(data.cancel);
     revisions.delete(data.cancel);

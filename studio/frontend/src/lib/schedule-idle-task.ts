@@ -1,6 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+const INPUT_QUIET_MS = 300;
+const INPUT_EVENTS = [
+  "wheel",
+  "scroll",
+  "pointerdown",
+  "keydown",
+  "touchstart",
+  "touchmove",
+] as const;
+let lastInputAt = Number.NEGATIVE_INFINITY;
+let watchingInput = false;
+const noteInput = (): void => {
+  lastInputAt = performance.now();
+};
+const watchInput = (): void => {
+  if (watchingInput || typeof document === "undefined") return;
+  watchingInput = true;
+  for (const type of INPUT_EVENTS) {
+    document.addEventListener(type, noteInput, { capture: true, passive: true });
+  }
+};
+
+export const inputQuietIn = (): number => {
+  watchInput();
+  return INPUT_QUIET_MS - (performance.now() - lastInputAt);
+};
+
 /**
  * Run `callback` once the main thread is idle, or after `timeout` at the latest; returns a
  * canceller. Falls back to setTimeout without requestIdleCallback (Safari, the WebKitGTK webview
@@ -35,7 +62,18 @@ export function scheduleIdleTask(
     };
   }
 
-  const handle = globalThis.setTimeout(run, Math.min(timeout, 120));
+  watchInput();
+  const deadline = performance.now() + timeout;
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const attempt = (): void => {
+    const wait = Math.min(inputQuietIn(), deadline - performance.now());
+    if (wait > 0) {
+      handle = globalThis.setTimeout(attempt, wait);
+      return;
+    }
+    run();
+  };
+  handle = globalThis.setTimeout(attempt, Math.min(timeout, 16));
   return () => {
     canceled = true;
     globalThis.clearTimeout(handle);

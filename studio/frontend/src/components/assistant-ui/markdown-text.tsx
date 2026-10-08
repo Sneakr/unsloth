@@ -83,7 +83,10 @@ import {
   trimTrailingNewlines,
   useFenceReached,
 } from "./code-fence-defer";
-import { requestFullHighlight } from "./use-reasoning-highlight";
+import {
+  highlightWorkerState,
+  requestFullHighlight,
+} from "./use-reasoning-highlight";
 import { derivedForParts, memoOnArray } from "./message-derived";
 import { MAX_HIGHLIGHT_CHARS } from "@/lib/markdown-plugins";
 import { markdownBlockFallback } from "./markdown-block-fallback";
@@ -917,6 +920,26 @@ const fenceHighlightOptions = (body: string, languageToken: string | null) => ({
 const tokenizesOffThread = (body: string, streaming: boolean): boolean =>
   !streaming && body.length > MAX_HIGHLIGHT_CHARS;
 
+const slowMainThreadRegex =
+  typeof window !== "undefined"
+  && typeof window.requestIdleCallback !== "function";
+const MAIN_THREAD_TAIL_CHARS = 512;
+
+const settlesOffThread = (
+  body: string,
+  streaming: boolean,
+  options: ReturnType<typeof fenceHighlightOptions>,
+): boolean => {
+  if (tokenizesOffThread(body, streaming)) return true;
+  if (streaming || !slowMainThreadRegex) return false;
+  const state = highlightWorkerState();
+  return (
+    state !== "unavailable"
+    && state !== "stalled"
+    && code.cover(options).uncovered > MAIN_THREAD_TAIL_CHARS
+  );
+};
+
 export const highlightFenceSource = (
   body: string,
   language: string | null,
@@ -940,8 +963,9 @@ function useFenceTokens(
   const [seed] = useState<{ body: string; tokens: FenceTokens } | null>(() => {
     if (!enabled) return null;
     const body = trimTrailingNewlines(source);
-    const settled = tokenizesOffThread(body, streaming)
-      ? code.cached(fenceHighlightOptions(body, languageToken))
+    const options = fenceHighlightOptions(body, languageToken);
+    const settled = settlesOffThread(body, streaming, options)
+      ? code.cached(options)
       : highlight(body, () => {});
     return settled ? { body, tokens: settled } : null;
   });
@@ -973,19 +997,36 @@ function useFenceTokens(
     let cancel: (() => void) | null = null;
     let release: (() => void) | null = null;
     let settled: FenceTokens | null = null;
-    if (tokenizesOffThread(body, streaming)) {
-      const options = fenceHighlightOptions(body, languageToken);
+    const options = fenceHighlightOptions(body, languageToken);
+    if (settlesOffThread(body, streaming, options)) {
+      const failover = !tokenizesOffThread(body, streaming);
       settled = code.cached(options);
       if (settled === null) {
-        cancel = requestFullHighlight(body, languageToken, (result) => {
-          if (result === null) return;
-          release?.();
-          release = null;
-          if (wanted.current !== body) return;
-          code.seed(options, result);
-          setTokens(result);
-        });
-        highlight("", () => {});
+        cancel = requestFullHighlight(
+          body,
+          languageToken,
+          (result) => {
+            if (result === null) {
+              if (failover && wanted.current === body) {
+                setTokens(highlight(body, late));
+              }
+              return;
+            }
+            release?.();
+            release = null;
+            if (wanted.current !== body) return;
+            code.seed(options, result);
+            setTokens(result);
+          },
+          false,
+          !failover,
+        );
+        if (cancel === null && failover) {
+          settled = highlight(body, late);
+        } else {
+          highlight("", () => {});
+          settled = code.cover(options).result;
+        }
         release = awaitWorker(body.length, () => {
           if (highlight("", () => {}) === null) return false;
           const result = code.highlightExact(

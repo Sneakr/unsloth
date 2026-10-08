@@ -16,6 +16,13 @@ export const lineContent = (
   return text;
 };
 
+const colored = (
+  tokens: ReasoningHighlightReply["lines"][number]["tokens"],
+): boolean =>
+  tokens.some(
+    (token) => token.color !== undefined || token.htmlStyle !== undefined,
+  );
+
 export const mergeLineTokens = (
   previous: ReasoningLineTokens,
   lines: ReasoningHighlightReply["lines"],
@@ -25,7 +32,9 @@ export const mergeLineTokens = (
   for (const { line, tokens } of lines) {
     const known = previous.get(line);
     const kept =
-      known !== undefined && lineContent(known) === lineContent(tokens)
+      known !== undefined &&
+      lineContent(known) === lineContent(tokens) &&
+      (colored(known) || !colored(tokens))
         ? known
         : tokens;
     if (kept !== known) changed = true;

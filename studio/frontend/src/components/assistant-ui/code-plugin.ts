@@ -16,7 +16,10 @@ import {
   type GrammarState,
   type ThemedToken,
 } from "shiki";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import {
+  createJavaScriptRegexEngine,
+  defaultJavaScriptRegexConstructor,
+} from "shiki/engine/javascript";
 
 // Common fence tags shiki doesn't expose as aliases.
 // Keys: lower-cased input; values: canonical shiki language ids.
@@ -200,8 +203,14 @@ const shedsClosingRun = (shorter: string, longer: string): boolean =>
   longer.startsWith(shorter) &&
   CLOSING_FENCE.test(longer.slice(shorter.length));
 
+export type FenceCover = {
+  uncovered: number;
+  result: HighlightResult | null;
+};
+
 export type UnslothCodePlugin = CodeHighlighterPlugin & {
   cached: (opts: HighlightOptions) => HighlightResult | null;
+  cover: (opts: HighlightOptions) => FenceCover;
   seed: (opts: HighlightOptions, result: HighlightResult) => void;
   highlight: (
     opts: HighlightOptions,
@@ -217,6 +226,11 @@ export type UnslothCodePlugin = CodeHighlighterPlugin & {
 const fenceKeyOf = (opts: HighlightOptions): string =>
   `${normalizeLanguage(opts.language)} ${themeKey(opts.themes[0])} ${themeKey(opts.themes[1])}`;
 
+const javaScriptCore =
+  typeof navigator !== "undefined"
+  && navigator.userAgent.includes("AppleWebKit/")
+  && !/Chrom(?:e|ium)\//.test(navigator.userAgent);
+
 export function createCodePlugin(
   options: CodePluginOptions = {},
 ): UnslothCodePlugin {
@@ -224,7 +238,23 @@ export function createCodePlugin(
     "github-light",
     "github-dark",
   ];
-  const engine = createJavaScriptRegexEngine({ forgiving: true });
+  const engine = createJavaScriptRegexEngine(
+    javaScriptCore
+      ? {
+          forgiving: true,
+          regexConstructor: (pattern) => {
+            try {
+              return defaultJavaScriptRegexConstructor(pattern, {
+                target: "ES2018",
+                accuracy: "strict",
+              });
+            } catch {
+              return defaultJavaScriptRegexConstructor(pattern);
+            }
+          },
+        }
+      : { forgiving: true },
+  );
   const highlighters = new Map<string, { highlighter: Highlighter | null }>();
   // Most recently used first.
   const fences: Fence[] = [];
@@ -313,6 +343,17 @@ export function createCodePlugin(
     return fence;
   };
 
+  const reachInto = (fence: Fence, code: string): number => {
+    if (fence.result === null || fence.seeded) return -1;
+    const anchor = fence.code;
+    // A block that lost more than its closing delimiter is a different fence;
+    // sharing this entry would cancel the refresh it has queued.
+    const reaches =
+      code.startsWith(anchor) ||
+      (code.length >= fence.committedLength && shedsClosingRun(code, anchor));
+    return anchor && reaches ? Math.min(anchor.length, code.length) : -1;
+  };
+
   /** The fence whose cached code reaches furthest into `code`. */
   const findFence = (key: string, code: string): Fence => {
     const exact = fencesByCode.get(codeKey(key, code));
@@ -326,15 +367,8 @@ export function createCodePlugin(
         if (fence.pending?.code === code) return promote(fence);
         continue;
       }
-      if (fence.seeded) continue;
-      const anchor = fence.code;
-      // A block that lost more than its closing delimiter is a different fence;
-      // sharing this entry would cancel the refresh it has queued.
-      const reaches =
-        code.startsWith(anchor) ||
-        (code.length >= fence.committedLength && shedsClosingRun(code, anchor));
-      const reach = Math.min(anchor.length, code.length);
-      if (!anchor || reach <= matchLength || !reaches) continue;
+      const reach = reachInto(fence, code);
+      if (reach <= matchLength) continue;
       match = fence;
       matchLength = reach;
     }
@@ -512,6 +546,28 @@ export function createCodePlugin(
       return exact && exact.code === opts.code && exact.result
         ? promote(exact).result
         : null;
+    },
+    cover: (opts) => {
+      const key = fenceKeyOf(opts);
+      const exact = fencesByCode.get(codeKey(key, opts.code));
+      if (exact && exact.code === opts.code && exact.result) {
+        return { uncovered: 0, result: exact.result };
+      }
+      let match: Fence | null = null;
+      let matchLength = -1;
+      for (const fence of fences) {
+        if (fence.key !== key) continue;
+        const reach = reachInto(fence, opts.code);
+        if (reach <= matchLength) continue;
+        match = fence;
+        matchLength = reach;
+      }
+      if (match === null) return { uncovered: opts.code.length, result: null };
+      return {
+        uncovered:
+          opts.code.length - Math.min(match.committedLength, opts.code.length),
+        result: approximateResult(match, opts.code),
+      };
     },
     seed: (opts, result) => {
       const key = fenceKeyOf(opts);

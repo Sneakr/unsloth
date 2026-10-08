@@ -35,7 +35,7 @@ import {
 import { planPrintTokenization } from "./code-fence-print";
 import { createFenceSpeculator } from "./fence-speculation";
 import { highlightWorkerState, streamActive } from "./use-reasoning-highlight";
-import { scheduleIdleTask } from "@/lib/schedule-idle-task";
+import { inputQuietIn, scheduleIdleTask } from "@/lib/schedule-idle-task";
 import {
   MAX_CACHED_CHARACTERS,
   MAX_FENCES,
@@ -346,6 +346,10 @@ export const grammarWarmed = (language: string | null): boolean =>
 const grammarOf = (gate: FenceGate): string =>
   normalizeLanguage(gate.language ?? "text");
 
+const warmMustWait = (): boolean =>
+  typeof (globalThis as Record<string, unknown>).requestIdleCallback !== "function"
+  && (streamActive() || inputQuietIn() > 0);
+
 const warmGrammars = (): void => {
   warmScheduled = false;
   // EVERY GRAMMAR STARTS LOADING IN THE FIRST TASK. A load is cheap and asynchronous, and it is
@@ -363,6 +367,10 @@ const warmGrammars = (): void => {
     // ours to tokenize speculatively. Neither marks the grammar warmed, so a later fence in the
     // same language still gets its real warm.
     if (gate.chars === 0 || gate.chars > MAX_HIGHLIGHT_CHARS) continue;
+    if (warmMustWait()) {
+      scheduleGrammarWarm();
+      return;
+    }
     grammarsWarmed.add(language);
     // TRUE, not false: real text is what takes the one-off tokenizer cost off the scroll.
     gate.warm(true);

@@ -87,6 +87,12 @@ type Props = {
 
 const hiddenTranscripts = new WeakSet<Element>();
 const blindTranscripts = new WeakSet<Element>();
+const withoutIdleCallback =
+  typeof window !== "undefined" &&
+  typeof window.requestIdleCallback !== "function";
+const MAIN_THREAD_HIGHLIGHT_CHARS = withoutIdleCallback
+  ? 2_000
+  : MAX_HIGHLIGHT_CHARS;
 
 const settleQueue = createSettleQueue<HTMLElement>(
   (callback) => requestAnimationFrame(callback),
@@ -271,8 +277,9 @@ const CodeFragment = memo(
       a.first === b.first &&
       a.last === b.last &&
       a.code?.language === b.code?.language &&
-      previous.result.get(a.code!.lines[0].line) ===
-        next.result.get(b.code!.lines[0].line)
+      a.code!.lines.every(
+        ({ line }) => previous.result.get(line) === next.result.get(line),
+      )
     );
   },
 );
@@ -370,7 +377,7 @@ function CodeGroup({
     code.source,
     code.language,
     lines,
-    code.incomplete || code.source.length > MAX_HIGHLIGHT_CHARS
+    code.incomplete || code.source.length > MAIN_THREAD_HIGHLIGHT_CHARS
       ? null
       : fallback,
   );

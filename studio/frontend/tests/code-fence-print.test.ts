@@ -38,7 +38,7 @@ test("a print tokenizes what the worker still owes, synchronously and within a b
   const hook = markdown.slice(markdown.indexOf("function useFenceTokens("), markdown.indexOf("function StreamingFenceBlock("));
   assert.equal((hook.match(/awaitWorker\(/g) ?? []).length, 1);
   assert.ok(hook.indexOf("requestFullHighlight(") < hook.indexOf("awaitWorker("));
-  assert.match(hook, /requestFullHighlight\(body, languageToken, \(result\) => \{\s*if \(result === null\) return;\s*release\?\.\(\);\s*release = null;/, "the worker's tokens end what the print entry stands for; a failed reply keeps it, so a print still colours the fence");
+  assert.match(hook, /requestFullHighlight\(\s*body,\s*languageToken,\s*\(result\) => \{\s*if \(result === null\) \{[^}]*\}\s*return;\s*\}\s*release\?\.\(\);\s*release = null;/, "the worker's tokens end what the print entry stands for; a failed reply keeps it, so a print still colours the fence");
   assert.match(defer, /export const upgradeFencesForPrint = \(\): void => \{\s*upgradeEverythingForPrint\(\);\s*if \(printing\) tokenizeForPrint\(\);\s*\};/, "a transcript that mounts fences after the fence door still gets them tokenized for the print");
   const probes = [...hook.matchAll(/highlight\("", /g)];
   assert.ok(probes.length >= 2);

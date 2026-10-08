@@ -21,3 +21,23 @@ test("the Windows thread gutter follows the native thin bar, which page zoom doe
   assert.match(runtime, /appliedInterfaceZoom = zoom;\s*document\.documentElement\.style\.setProperty\("--studio-interface-zoom", String\(zoom\)\);/);
   assert.match(readSrc("index.css"), /:root\.client-windows \{\s*--thread-scrollbar-gutter: calc\(10px \/ var\(--studio-interface-zoom, 1\)\);\s*\}/);
 });
+
+test("without requestIdleCallback, main-thread grammar work waits for the reader and the stream", () => {
+  const defer = readSrc("components/assistant-ui/code-fence-defer.tsx");
+  assert.match(defer, /const warmMustWait = \(\): boolean =>\s*typeof \(globalThis as Record<string, unknown>\)\.requestIdleCallback !== "function"\s*&& \(streamActive\(\) \|\| inputQuietIn\(\) > 0\);/);
+  assert.ok(defer.indexOf("if (warmMustWait()) {") < defer.indexOf("grammarsWarmed.add(language);"), "a warm that has to wait does not mark its grammar warmed");
+  const highlight = readSrc("components/assistant-ui/use-reasoning-highlight.ts");
+  assert.match(highlight, /const quietIn = inputQuietIn\(\);\s*if \(quietIn > 0\) \{\s*const timer = setTimeout\(drainFallback, quietIn\);\s*fallbackPending = \(\) => clearTimeout\(timer\);\s*return;\s*\}\s*fallbackQueue\.shift\(\)\?\.\(\);/, "a fallback tokenization never starts in the middle of a scroll");
+});
+
+test("settled fences go to the worker where the main thread's regex engine is slow", () => {
+  const markdown = readSrc("components/assistant-ui/markdown-text.tsx");
+  assert.match(markdown, /const slowMainThreadRegex =\s*typeof window !== "undefined"\s*&& typeof window\.requestIdleCallback !== "function";/);
+  assert.match(markdown, /if \(streaming \|\| !slowMainThreadRegex\) return false;\s*const state = highlightWorkerState\(\);\s*return \(\s*state !== "unavailable"\s*&& state !== "stalled"\s*&& code\.cover\(options\)\.uncovered > MAIN_THREAD_TAIL_CHARS\s*\);/, "JavaScriptCore interprets every lookbehind pattern, so WebKit tokenizes settled fences off the main thread, unless the main thread's own cache leaves only a short tail, as it does for the fence that just streamed");
+  assert.match(markdown, /const MAIN_THREAD_TAIL_CHARS = 512;/);
+  assert.equal(markdown.includes("fenceJustStreamed"), false, "routing reads the cache itself, not a guess about which fence streamed last");
+  const plugin = readSrc("components/assistant-ui/code-plugin.ts");
+  assert.match(plugin, /return defaultJavaScriptRegexConstructor\(pattern, \{\s*target: "ES2018",\s*accuracy: "strict",\s*\}\);\s*\} catch \{\s*return defaultJavaScriptRegexConstructor\(pattern\);\s*\}/, "u-flag patterns build several times faster in JavaScriptCore, and anything ES2018 cannot express keeps today's constructor");
+  assert.match(plugin, /const javaScriptCore =\s*typeof navigator !== "undefined"\s*&& navigator\.userAgent\.includes\("AppleWebKit\/"\)\s*&& !\/Chrom\(\?:e\|ium\)\\\/\/\.test\(navigator\.userAgent\);/, "workers have a navigator too, so the worker's highlighter makes the same choice");
+  assert.match(plugin, /: \{ forgiving: true \},\s*\);/, "V8 matches the emulated ES2018 patterns about 7% slower, so Blink keeps the engine's own target");
+});

@@ -33,7 +33,7 @@ test("every gate joins and leaves the speculator with its registration, and a la
   assert.match(DEFER, /fenceSpeculator\.remove\(registered\);\s*unreached\.delete\(registered\);/);
   assert.match(DEFER, /unreached\.delete\(gate\);\s*fenceSpeculator\.remove\(gate\);\s*gate\.warm\(true\);/);
   assert.match(DEFER, /latchNow\(arrived\);\s*fenceSpeculator\.rerank\(\);/);
-  assert.match(PLUGIN, /if \(fence\.seeded\) continue;/, "a seeded entry is an exact hit only, never a prefix anchor");
+  assert.match(PLUGIN, /const reachInto = \(fence: Fence, code: string\): number => \{\s*if \(fence\.result === null \|\| fence\.seeded\) return -1;/, "a seeded entry is an exact hit only, never a prefix anchor");
   assert.match(PLUGIN, /export const MAX_FENCES = 512;\s*export const MAX_CACHED_CHARACTERS = 512_000;/);
 });
 

@@ -1931,7 +1931,7 @@ const ForkContinuationRule: FC = () => {
   );
 };
 
-const PREWARM_INPUT_QUIET_MS = 300;
+const PREWARM_INPUT_QUIET_MS = 1000;
 const PREWARM_INPUT_EVENTS = [
   "scroll",
   "wheel",

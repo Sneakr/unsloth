@@ -12,6 +12,7 @@ type Client = {
     language: string | null,
     onResult: (result: unknown) => void,
     speculative?: boolean,
+    patient?: boolean,
   ) => (() => void) | null;
   highlightWorkerState: () => string;
 };
@@ -67,7 +68,7 @@ function setup(t: TestContext): { client: Client; drain: () => void } {
     {
       react: { useEffect: () => {}, useRef: () => ({ current: null }), useState: () => [null, () => {}] },
       "@/features/chat": { useChatRuntimeStore: {} },
-      "@/lib/schedule-idle-task": { scheduleIdleTask: () => () => {} },
+      "@/lib/schedule-idle-task": { scheduleIdleTask: () => () => {}, inputQuietIn: () => 0 },
       "./reasoning-highlight": MESSAGES,
       "./reasoning-line-tokens": { mergeLineTokens: () => new Map() },
       "./stream-activity": { createStreamActivity: () => ({ active: () => false }) },
@@ -79,11 +80,15 @@ function setup(t: TestContext): { client: Client; drain: () => void } {
   return { client, drain };
 }
 
-async function stallBoot(t: TestContext, client: Client): Promise<void> {
-  t.mock.timers.tick(5_000);
+async function settleChannels(client: Client): Promise<void> {
   for (let turn = 0; turn < 50 && client.highlightWorkerState() !== "stalled"; turn += 1) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+}
+
+async function stallBoot(t: TestContext, client: Client): Promise<void> {
+  t.mock.timers.tick(5_000);
+  await settleChannels(client);
   assert.equal(client.highlightWorkerState(), "stalled");
 }
 
@@ -159,4 +164,61 @@ test("a worker that fails a whole-fence request answers it once with a failure",
   drain();
   assert.deepEqual(fence, [null]);
   assert.equal(client.highlightWorkerState(), "ready");
+});
+
+test("a fence the main thread could tokenize does not wait out a late boot", async (t) => {
+  const { client, drain } = setup(t);
+  const short: unknown[] = [];
+  const long: unknown[] = [];
+  assert.ok(client.requestFullHighlight("<p></p>", "html", (result) => short.push(result), false, false));
+  assert.ok(client.requestFullHighlight("<html></html>", "html", (result) => long.push(result)));
+  await stallBoot(t, client);
+  drain();
+  assert.deepEqual(short, [null], "handed back, so it is tokenized on the main thread as it would be without a worker");
+  assert.deepEqual(long, [], "a fence too long for the main thread keeps waiting");
+  assert.equal(client.requestFullHighlight("<b></b>", "html", () => {}, false, false), null, "while the worker is late, short fences never queue on it");
+});
+
+test("a ready worker that sends nothing while a fence waits is treated as late until it answers", async (t) => {
+  const { client, drain } = setup(t);
+  const short: unknown[] = [];
+  const long: unknown[] = [];
+  client.requestFullHighlight("<p></p>", "html", (result) => short.push(result), false, false);
+  client.requestFullHighlight("<html></html>", "html", (result) => long.push(result));
+  const [silent] = FakeWorker.made;
+  silent.send({ ready: true });
+  t.mock.timers.tick(14_999);
+  await settleChannels(client);
+  assert.equal(client.highlightWorkerState(), "ready", "fifteen seconds of silence, not less");
+  t.mock.timers.tick(1);
+  await settleChannels(client);
+  assert.equal(client.highlightWorkerState(), "stalled");
+  drain();
+  assert.deepEqual(short, [null]);
+  assert.deepEqual(long, []);
+  const [, waiting] = silent.requests();
+  silent.send({ client: waiting, revision: 1, lines: [], result: RESULT });
+  assert.equal(client.highlightWorkerState(), "ready", "the first word from the worker ends the stall");
+  assert.deepEqual(long, [RESULT]);
+  assert.equal(silent.terminated, false);
+});
+
+test("a busy worker that keeps answering is never declared silent", async (t) => {
+  const { client } = setup(t);
+  const results: unknown[] = [];
+  for (const source of ["<a></a>", "<b></b>", "<i></i>"]) {
+    client.requestFullHighlight(source, "html", (result) => results.push(result), false, false);
+  }
+  const [busy] = FakeWorker.made;
+  busy.send({ ready: true });
+  for (const id of busy.requests()) {
+    t.mock.timers.tick(10_000);
+    await settleChannels(client);
+    assert.equal(client.highlightWorkerState(), "ready");
+    busy.send({ client: id, revision: 1, lines: [], result: RESULT });
+  }
+  assert.deepEqual(results, [RESULT, RESULT, RESULT]);
+  t.mock.timers.tick(30_000);
+  await settleChannels(client);
+  assert.equal(client.highlightWorkerState(), "ready", "with nothing waiting, silence means nothing");
 });
