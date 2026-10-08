@@ -4330,12 +4330,12 @@ html[data-chat-font] .aui-root {
 		margin-right: calc(var(--spacing) * 1);
 	}
 
-	.aui-thread-root [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) > .relative {
+	.aui-thread-root [data-streamdown="table-wrapper"] > div > .relative {
 		display: flex;
 	}
 
-	.aui-thread-root [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) > button,
-	.aui-thread-root [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) > .relative > button {
+	.aui-thread-root [data-streamdown="table-wrapper"] > div > button,
+	.aui-thread-root [data-streamdown="table-wrapper"] > div > .relative > button {
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -4346,8 +4346,8 @@ html[data-chat-font] .aui-root {
 		color: var(--color-chat-icon-fg);
 	}
 
-	.aui-thread-root [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) > button:hover:not(:disabled),
-	.aui-thread-root [data-streamdown="table-wrapper"] > div:first-child:not(:last-child) > .relative > button:hover:not(:disabled) {
+	.aui-thread-root [data-streamdown="table-wrapper"] > div > button:hover:not(:disabled),
+	.aui-thread-root [data-streamdown="table-wrapper"] > div > .relative > button:hover:not(:disabled) {
 		background-color: var(--color-chat-icon-bg-hover);
 		color: var(--color-chat-icon-fg-hover);
 	}

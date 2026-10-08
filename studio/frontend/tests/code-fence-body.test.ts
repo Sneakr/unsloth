@@ -285,8 +285,9 @@ test("a fence source is highlighted once per revision, not twice", () => {
   );
 });
 
-const TABLE_CONTROLS =
-  '[data-streamdown="table-wrapper"] > div:first-child:not(:last-child)';
+const TABLE_CONTROLS = '[data-streamdown="table-wrapper"] > div';
+const POSITIONAL_ANCESTOR =
+  /:(?:first|last|only)-child[^{,]*?>\s*(?:\.relative|button)\b/;
 const TABLE_BUTTON =
   /height: calc\(var\(--spacing\) \* 8\);[\s\S]*border-radius: 10px;\s*color: var\(--color-chat-icon-fg\);/;
 
@@ -299,3 +300,19 @@ test("a table's toolbar buttons are drawn like the code block's", () => {
     css.includes(`${TABLE_CONTROLS} > .relative {\n\t\tdisplay: flex;`),
   );
 });
+
+test("no positional pseudo-class sits above .relative or button in a selector", () => {
+  const css = readSrc("index.css");
+  const rules = css.match(/[^{}]+\{/g) ?? [];
+  const offenders = rules.filter((rule) => POSITIONAL_ANCESTOR.test(rule));
+  assert.deepEqual(
+    offenders,
+    [],
+    "a :first-child or :last-child above a subject keys the invalidation set on that subject, so inserting before #root (every modal's focus guard) restyled every .relative and button in the app",
+  );
+  assert.ok(
+    css.includes('[data-streamdown="table-wrapper"] > div:first-child:not(:last-child) {\n\t\tmargin-right:'),
+    "on the subject itself the same test only invalidates the controls",
+  );
+});
+
