@@ -21,6 +21,13 @@ test("a fence body becomes skippable only once it carries its measured height", 
   assert.match(autoscroll, /const adjustForContentInsertedAbove = useCallback\(\(deltaPx: number\) => \{\s*adjustImplRef\.current\(deltaPx\);\s*return userDetachedRef\.current;\s*\}, \[\]\);/, "the hold learns whether its correction was written, even when the engine rounded it to nothing");
 });
 
+test("only engines without requestIdleCallback shrink the widening step after a long commit", () => {
+  const transcript = readSrc("components/assistant-ui/reasoning-transcript.tsx");
+  assert.match(transcript, /if \(grew && withoutIdleCallback\)\s*widenCommitMs = Math\.max\(widenCommitMs, performance\.now\(\) - commitStartedAt\);/, "Blink commits a full step inside a frame, so it keeps filling at full speed");
+  assert.match(transcript, /widenScale \* Math\.min\(2, WIDEN_COMMIT_TARGET_MS \/ widenCommitMs\)/);
+  assert.match(transcript, /const MIN_WIDEN_SCALE = 1 \/ 8;/);
+});
+
 test("a desktop zoom shows skipped content until WebKit has measured it at the new zoom", () => {
   const store = readSrc("features/settings/stores/interface-scale-store.ts");
   assert.match(store, /holdContainmentAcrossZoom\(\);\s*try \{\s*await getCurrentWebview\(\)\.setZoom\(zoom\);\s*\} finally \{\s*releaseContainmentAfterZoom\(\);\s*\}/);

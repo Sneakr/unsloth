@@ -77,7 +77,7 @@ test("the transcript mounts every fragment and never unmounts one for scrolling"
   assert.match(TRANSCRIPT, /limitRef\.current = isCovered\(rows, all\.length\)\s*\? Number\.POSITIVE_INFINITY\s*: rows;/, "and the limit is dropped for good once it covers the trace");
   assert.match(TRANSCRIPT, /if \(streamingRef\.current\) setLimit\(value\);\s*else startTransition\(\(\) => setLimit\(value\)\);/, "widening yields to input on a settled trace and cannot be starved by a stream");
   assert.match(TRANSCRIPT, /if \(widenFrame === 0\) widenFrame = requestAnimationFrame\(widenAll\);/, "one shared frame drives every open transcript");
-  assert.match(TRANSCRIPT, /let characters = WIDEN_CHARACTERS_PER_FRAME;/, "under one shared budget of characters per frame");
+  assert.match(TRANSCRIPT, /let characters = Math\.ceil\(WIDEN_CHARACTERS_PER_FRAME \* widenScale\);/, "under one shared budget of characters per frame");
   const movers = TRANSCRIPT.replace(/useState\(\(\) => \{[\s\S]*?\n {2}\}\);/, "").replace(/setLimit\(isCovered\(value, fragments\.length\) \? Number\.POSITIVE_INFINITY : value\);/, "").replace(/requestedAt\.current = performance\.now\(\);\s*setLimit\(current\);/, "");
   assert.equal(/setLimit\((?!value\))/.test(movers), false, "no other path moves the limit, except the bounded restart for a replaced document and the re-issue of a starved request at its own value");
   assert.match(TRANSCRIPT, /if \(mount\.origin !== origin\) \{[\s\S]*?setMount\(\{\s*origin,\s*limit:/, "a replaced document restarts the bounded mount instead of mounting the new trace whole");
@@ -145,7 +145,7 @@ test("the DOM the rest of the app reads is unchanged", () => {
   assert.match(TRANSCRIPT, /const STARVED_MS = 200;/);
   assert.match(TRANSCRIPT, /return NOTHING_SPENT;\s*\}\s*if \(isCovered\(current, all\.length\)\) return null;/, "the final step waits for its own commit too, so a starved last transition is re-issued instead of leaving the tail a spacer");
   assert.equal(TRANSCRIPT.includes("afterprint"), false, "nothing unmounts rows after a print");
-  assert.match(TRANSCRIPT, /let characters = WIDEN_CHARACTERS_PER_FRAME;\s*let rows = WIDEN_FRAGMENTS_PER_FRAME;\s*const pending = \[\.\.\.wideners\];/, "one frame's rows are shared by every open transcript, so their transitions land as one bounded commit");
+  assert.match(TRANSCRIPT, /let characters = Math\.ceil\(WIDEN_CHARACTERS_PER_FRAME \* widenScale\);\s*let rows = Math\.ceil\(WIDEN_FRAGMENTS_PER_FRAME \* widenScale\);\s*const pending = \[\.\.\.wideners\];/, "one frame's rows are shared by every open transcript, so their transitions land as one bounded commit");
   assert.match(TRANSCRIPT, /const remaining = pending\.length - at;/, "and a transcript that spends nothing passes its share on");
   assert.match(TRANSCRIPT, /Math\.min\(share, allowed\.fragments\),/, "and a transcript's rows never exceed its share of the frame");
   assert.match(TRANSCRIPT, /requestedAt\.current = performance\.now\(\);\s*limitRef\.current = isCovered\(rows, all\.length\)/, "the request time is what the starvation check measures from");

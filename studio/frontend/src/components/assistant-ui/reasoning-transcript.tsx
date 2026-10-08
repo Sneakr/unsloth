@@ -120,11 +120,26 @@ type Widener = (characters: number, rows: number) => Spent | null;
 const NOTHING_SPENT: Spent = { characters: 0, rows: 0 };
 const wideners = new Set<Widener>();
 let widenFrame = 0;
+const WIDEN_COMMIT_TARGET_MS = 16;
+const MIN_WIDEN_SCALE = 1 / 8;
+let widenScale = 1;
+let commitStartedAt = 0;
+let widenCommitMs = 0;
 
 const widenAll = (): void => {
   widenFrame = 0;
-  let characters = WIDEN_CHARACTERS_PER_FRAME;
-  let rows = WIDEN_FRAGMENTS_PER_FRAME;
+  if (widenCommitMs > 0) {
+    widenScale = Math.min(
+      1,
+      Math.max(
+        MIN_WIDEN_SCALE,
+        widenScale * Math.min(2, WIDEN_COMMIT_TARGET_MS / widenCommitMs),
+      ),
+    );
+    widenCommitMs = 0;
+  }
+  let characters = Math.ceil(WIDEN_CHARACTERS_PER_FRAME * widenScale);
+  let rows = Math.ceil(WIDEN_FRAGMENTS_PER_FRAME * widenScale);
   const pending = [...wideners];
   for (let at = 0; at < pending.length; at += 1) {
     if (characters <= 0 || rows <= 0) break;
@@ -584,7 +599,10 @@ export function ReasoningTranscript({
   const requestedAt = useRef(0);
   const reserves = useRef(new Map<string, Reserve>());
   const commitEdge = useRef({ before: () => {}, after: () => {} });
-  const beforeCommit = useCallback(() => commitEdge.current.before(), []);
+  const beforeCommit = useCallback(() => {
+    commitStartedAt = performance.now();
+    commitEdge.current.before();
+  }, []);
   const afterCommit = useCallback(() => commitEdge.current.after(), []);
   const mountedAt = useRef(0);
   useLayoutEffect(() => {
@@ -609,6 +627,8 @@ export function ReasoningTranscript({
       mountedIslands.current = islands;
       recapture.current();
     }
+    if (grew && withoutIdleCallback)
+      widenCommitMs = Math.max(widenCommitMs, performance.now() - commitStartedAt);
     if (restarted) demandNow.current();
   });
   useEffect(() => {
