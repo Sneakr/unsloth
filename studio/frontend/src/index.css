@@ -4163,11 +4163,6 @@ html[data-chat-font] .aui-root {
 		animation: artifact-loading-line 1.7s linear infinite;
 	}
 
-	:root[data-chat-split-resizing] *,
-	:root[data-chat-split-resizing] *:hover {
-		cursor: col-resize !important;
-	}
-
 	@keyframes artifact-card-shimmer {
 		to {
 			transform: translateX(120%);

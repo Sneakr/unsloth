@@ -84,6 +84,7 @@ import { isNpuModelId } from "@/features/npu";
 import { GuidedTour, useGuidedTourController } from "@/features/tour";
 import { isTauri } from "@/lib/api-base";
 import { useDocumentFlag } from "@/lib/document-flag";
+import { Z_LAYER } from "@/lib/z-layers";
 import { chatModelLoaded } from "./lib/chat-model-loaded";
 import { hasKnownContextWindow } from "./lib/context-window-known";
 import { isDownloadCancelled } from "@/lib/native-files";
@@ -921,14 +922,17 @@ const SingleContent = memo(function SingleContent({
           disabled={!artifactLayoutActive || browserFullView}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
-            document.documentElement.setAttribute("data-chat-split-resizing", "");
+            const overlay = document.createElement("div");
+            overlay.setAttribute("aria-hidden", "true");
+            overlay.style.cssText = `position:fixed;inset:0;z-index:${Z_LAYER.DRAG_CURSOR_OVERLAY};background:transparent;pointer-events:auto;cursor:col-resize;user-select:none;touch-action:none`;
+            document.body.append(overlay);
             const unpin = pinBrowserPage(event.currentTarget);
             const release = () => {
               window.removeEventListener("pointerup", release);
               window.removeEventListener("pointercancel", release);
               window.removeEventListener("blur", release);
               window.removeEventListener("pointermove", released);
-              document.documentElement.removeAttribute("data-chat-split-resizing");
+              overlay.remove();
               unpin();
               rememberArtifactPanelWidth();
             };

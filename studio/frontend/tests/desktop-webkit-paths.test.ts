@@ -56,3 +56,11 @@ test("settled fences go to the worker where the main thread's regex engine is sl
   assert.match(plugin, /const javaScriptCore =\s*typeof navigator !== "undefined"\s*&& navigator\.userAgent\.includes\("AppleWebKit\/"\)\s*&& !\/Chrom\(\?:e\|ium\)\\\/\/\.test\(navigator\.userAgent\);/, "workers have a navigator too, so the worker's highlighter makes the same choice");
   assert.match(plugin, /: \{ forgiving: true \},\s*\);/, "V8 matches the emulated ES2018 patterns about 7% slower, so Blink keeps the engine's own target");
 });
+
+test("find in page waits for the wheel to stop before rebuilding its index", () => {
+  const find = readSrc("features/find-in-page/hooks/use-find-in-page.ts");
+  assert.match(find, /const flush = \(\) => \{\s*const wait = REINDEX_INTERVAL_MS - \(performance\.now\(\) - scrolledAt\);\s*if \(wait > 0\) \{\s*timerRef\.current = setTimeout\(flush, wait\);\s*return;\s*\}/);
+  assert.match(find, /window\.addEventListener\("wheel", noteScroll, \{ capture: true, passive: true \}\);/);
+  assert.match(find, /window\.removeEventListener\("wheel", noteScroll, \{ capture: true \}\);/);
+  assert.equal(/addEventListener\("scroll", noteScroll/.test(find), false, "autoscroll's own scrolling must not starve a followed stream of rebuilds");
+});
