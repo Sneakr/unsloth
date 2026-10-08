@@ -2412,14 +2412,14 @@ html[data-chat-font] .aui-root {
 		margin-right: calc(3.4px * var(--ui-space-scale, 1));
 	}
 	.aui-branch-chevron-btn,
-	.aui-branch-chevron-btn + * {
+	.aui-branch-chevron-btn + .aui-branch-picker-state {
 		--aui-chevron-slot: calc(20px * var(--ui-space-scale, 1));
 		--aui-chevron-hit: max(calc(24px * var(--ui-interface-scale, 1)), var(--aui-chevron-slot));
 		--aui-chevron-extra: calc(var(--aui-chevron-hit) - var(--aui-chevron-slot));
 	}
 	/* The count between the chevrons is at least as wide as both extensions, so they cannot meet over it even
 	   in a narrow custom chat font. Wider counts, the usual case, are untouched. */
-	.aui-branch-chevron-btn + :not(.aui-branch-chevron-btn) {
+	.aui-branch-chevron-btn + .aui-branch-picker-state {
 		/* 1px of slack: two targets that only touch can still trade a sub-pixel once snapped to device pixels. */
 		min-inline-size: calc(var(--aui-chevron-extra) * 2 + 1px);
 		text-align: center;
@@ -4385,10 +4385,10 @@ html[data-chat-font] .aui-root {
 	   padding, so a header next to a paragraph reads the same as a paragraph next to a
 	   paragraph. `:where()` keeps this at zero specificity so a part that does set its own
 	   `mt-*` still wins. The first real child follows a zero-height badge anchor and gets none. */
-	:where(.aui-assistant-message-content > :not(:first-child)) {
+	:where(.aui-assistant-message-content > *):where(:not(:first-child)) {
 		margin-top: calc(1rem * var(--ui-space-scale, 1));
 	}
-	:where(.aui-assistant-message-content > .h-0 + *) {
+	:where(.aui-assistant-message-content > *):where(.h-0 + *) {
 		margin-top: 0;
 	}
 
