@@ -51,6 +51,7 @@ import {
   estimateFragmentHeight,
   type FragmentGeometry,
   frameBudget,
+  groupKeyOf,
   INITIAL_VIEWPORTS,
   initialRows,
   isCovered,
@@ -354,10 +355,12 @@ function Chunk({
 }
 
 function CodeGroup({
+  fence,
   indices,
   fragments,
   streaming,
 }: {
+  fence: string;
   indices: number[];
   fragments: readonly ReasoningFragment[];
   streaming: boolean;
@@ -415,6 +418,7 @@ function CodeGroup({
     [source, code.language],
   );
   const result = useReasoningHighlight(
+    fence,
     source,
     code.language,
     lines,
@@ -525,25 +529,42 @@ const DEFAULT_GEOMETRY: FragmentGeometry = {
   width: 640,
   lineHeight: 24,
   fontPixels: 15,
+  codeLineHeight: 19,
+  codeFontPixels: 12,
+  codeFooter: 12,
 };
 
-const measureGeometry = (element: HTMLElement): FragmentGeometry | null => {
+const measureGeometry = (
+  element: HTMLElement,
+  codeProbe: HTMLElement | null,
+): FragmentGeometry | null => {
   const width = element.getBoundingClientRect().width;
   if (!width) return null;
   const style = getComputedStyle(element);
+  const lines = codeProbe?.firstElementChild;
+  const code = lines ? getComputedStyle(lines) : null;
+  const footer = codeProbe ? getComputedStyle(codeProbe) : null;
   return {
     width,
     lineHeight: Number.parseFloat(style.lineHeight) || DEFAULT_GEOMETRY.lineHeight,
     fontPixels: Number.parseFloat(style.fontSize) || DEFAULT_GEOMETRY.fontPixels,
+    codeLineHeight:
+      Number.parseFloat(code?.lineHeight ?? "") || DEFAULT_GEOMETRY.codeLineHeight,
+    codeFontPixels:
+      Number.parseFloat(code?.fontSize ?? "") || DEFAULT_GEOMETRY.codeFontPixels,
+    codeFooter: footer
+      ? (Number.parseFloat(footer.paddingBottom) || 0) +
+        (Number.parseFloat(footer.borderBottomWidth) || 0)
+      : DEFAULT_GEOMETRY.codeFooter,
   };
 };
 
 const keepGeometry =
   (next: FragmentGeometry) =>
   (old: FragmentGeometry): FragmentGeometry =>
-    old.width === next.width &&
-    old.lineHeight === next.lineHeight &&
-    old.fontPixels === next.fontPixels
+    (Object.keys(next) as (keyof FragmentGeometry)[]).every(
+      (key) => old[key] === next[key],
+    )
       ? old
       : next;
 
@@ -556,6 +577,7 @@ export function ReasoningTranscript({
   streaming,
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
+  const codeProbe = useRef<HTMLDivElement>(null);
   const [index] = useState(() => cachedReasoningTranscriptIndex(indexKey));
   const fragments = useMemo(() => index.update(documents), [documents, index]);
   const fragmentsRef = useRef(fragments);
@@ -716,7 +738,7 @@ export function ReasoningTranscript({
 
   useLayoutEffect(() => {
     const element = root.current;
-    const next = element && measureGeometry(element);
+    const next = element && measureGeometry(element, codeProbe.current);
     if (next) setGeometry(keepGeometry(next));
   }, []);
 
@@ -916,7 +938,7 @@ export function ReasoningTranscript({
         return;
       }
       resettleRows(element);
-      const next = measureGeometry(element);
+      const next = measureGeometry(element, codeProbe.current);
       if (next) setGeometry(keepGeometry(next));
       if (reading) hold(reading);
     };
@@ -997,6 +1019,7 @@ export function ReasoningTranscript({
       return (
         <CodeGroup
           key={group.key}
+          fence={`${messageId}:${groupKeyOf(fragments[slice.first])}`}
           indices={indices}
           fragments={fragments}
           streaming={streaming}
@@ -1065,6 +1088,13 @@ export function ReasoningTranscript({
         className="relative min-w-0"
         style={{ overflowAnchor: "none" }}
       >
+        <div
+          ref={codeProbe}
+          aria-hidden
+          className="aui-reasoning-code-fragment aui-reasoning-code-last pointer-events-none invisible absolute"
+        >
+          <div className="aui-reasoning-code-lines" />
+        </div>
         <CommitBounds before={beforeCommit} after={afterCommit}>
           {rendered}
         </CommitBounds>

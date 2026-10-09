@@ -28,8 +28,9 @@ self.onmessage ??= ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
     sources.delete(data.cancel);
     return;
   }
+  const base = typeof data.source === "string" ? undefined : data.source.base;
   let source = reasoningHighlightSource(
-    sources.get(data.client) ?? "",
+    sources.get(base ?? data.client) ?? "",
     data.source,
   );
   for (const known of sources.values()) {

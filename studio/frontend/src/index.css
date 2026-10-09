@@ -1838,7 +1838,8 @@ html[data-contrast-adjust].dark .hub-page :is([class*="bg-background"], [class*=
 
 /* Code font size: only overrides when the user sets an explicit size, so the
    per-element Tailwind sizes stay authoritative by default. */
-html[data-code-font-size] :is(pre, code, kbd, samp) {
+html[data-code-font-size] :is(pre, code, kbd, samp),
+html[data-code-font-size] .aui-reasoning-code-lines {
 	font-size: var(--custom-code-font-size) !important;
 }
 

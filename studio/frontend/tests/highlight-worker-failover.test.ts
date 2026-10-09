@@ -36,11 +36,11 @@ test("a failed worker is never rebuilt and every waiting caller hears about it o
   const stall = HOOK.slice(HOOK.indexOf("function stall("), HOOK.indexOf("function getWorker("));
   assert.ok(stall.includes('state = "stalled";') && !stall.includes("terminate()"), "a worker that is late keeps running and recovers on its ready message");
   assert.ok(stall.includes("flushListeners(patientClients);"), "a late worker fails every caller except the whole-fence requests waiting on it");
-  assert.match(HOOK, /if \(state === "stalled"\) return patient \? worker : null;/, "a whole-fence request queues on a late worker; every other caller highlights on the main thread while it is late");
+  assert.match(HOOK, /if \(state === "stalled" && !patient\) return null;\s*if \(idle\) clearTimeout\(idle\);/, "a whole-fence request queues on a late worker; every other caller highlights on the main thread while it is late, and turning one away leaves the idle teardown armed");
   assert.match(HOOK, /speculative = false,\s*patient = !speculative,\s*\): \(\(\) => void\) \| null \{\s*const instance = getWorker\(patient\);\s*if \(!instance\) return null;\s*const id = \+\+nextClient;\s*if \(patient\) patientClients\.add\(id\);/);
   assert.equal((HOOK.match(/patientClients\.delete\(id\);/g) ?? []).length, 2, "an answered or cancelled request stops waiting");
   assert.match(HOOK, /idle = setTimeout\(\(\) => \{\s*if \(!worker \|\| boot\?\.instance === worker\) return;\s*worker\.terminate\(\);/, "and the idle teardown never kills a worker that is still booting, so the late ready can arrive");
-  assert.match(HOOK, /clearBoot\(instance\);\s*state = "ready";\s*watchSilence\(instance\);\s*if \(listeners\.size === 0\) scheduleIdle\(\);/, "a worker that recovered with nothing waiting is torn down when idle like any other");
+  assert.match(HOOK, /clearBoot\(instance\);\s*const late = state === "stalled";\s*state = "ready";\s*watchSilence\(instance\);\s*if \(listeners\.size === 0\) scheduleIdle\(\);\s*if \(late\) announceRecovery\(\);/, "a worker that recovered with nothing waiting is torn down when idle like any other");
   const writes = HOOK.match(/state = "unavailable";/g) ?? [];
   assert.equal(writes.length, 3, "fail() and the two constructor guards; a stall is not a failure");
   const idle = HOOK.slice(HOOK.indexOf("function scheduleIdle("), HOOK.indexOf("export function requestFullHighlight("));
@@ -65,7 +65,7 @@ test("a fence too long for the main thread stays plain without the worker, and t
   assert.match(WORKER, /const result = request\.full \|\| request\.exact\s*\? highlighter\.highlightExact\(options, publish\)\s*: highlighter\.highlight\(options, publish\);/, "a whole-fence reply is exact, since the main thread seeds it as a permanent cache entry, and so is a thinking code group no later request will refresh");
   assert.match(HOOK, /useEffect\(\(\) => \{\s*if \(lineKey === ""\) return;/);
   assert.ok(HOOK.includes("if (!instance) return runFallback();"));
-  assert.match(HOOK, /if \(reply\.failed\) \{\s*sent\.current = null;\s*if \(revision\.current !== version\) return;\s*cancelFallback = runFallback\(\);\s*return;\s*\}/);
+  assert.match(HOOK, /if \(reply\.failed\) \{\s*if \(revision\.current !== version\) return;\s*cancelFallback = runFallback\(\);\s*return;\s*\}/);
   assert.match(HOOK, /\(\) => \(\) => \{\s*revision\.current \+= 1;/, "an unmounted group never queues a fallback");
   assert.ok(TRANSCRIPT.includes("highlightFenceSource(source, code.language, late)"), "the fallback tokenizes exactly the string the worker tokenizes");
   assert.match(WORKER, /if \(request\.full && result !== null\) forget\(\);/, "a finished whole-fence request leaves nothing behind in the worker");

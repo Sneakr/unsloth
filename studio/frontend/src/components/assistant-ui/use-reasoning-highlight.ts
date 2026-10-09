@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { HighlightResult } from "@streamdown/code";
 import { useChatRuntimeStore } from "@/features/chat";
 import { inputQuietIn, scheduleQuietIdleTask } from "@/lib/schedule-idle-task";
@@ -42,10 +42,30 @@ let nextClient = 0;
 const listeners = new Map<number, (reply: ReasoningHighlightReply) => void>();
 const patientClients = new Set<number>();
 const awaitingReply = new Set<number>();
+const fenceSources = new Map<
+  string,
+  { worker: Worker; client: number; source: string }
+>();
 let silence: ReturnType<typeof setTimeout> | undefined;
 let activity: StreamActivity | null = null;
+let recoveries = 0;
+const recoveryListeners = new Set<() => void>();
 
 export const highlightWorkerState = (): HighlightWorkerState => state;
+
+const subscribeRecovery = (listener: () => void): (() => void) => {
+  recoveryListeners.add(listener);
+  return () => {
+    recoveryListeners.delete(listener);
+  };
+};
+
+const recoveryCount = (): number => recoveries;
+
+const announceRecovery = (): void => {
+  recoveries += 1;
+  for (const listener of recoveryListeners) listener();
+};
 
 export const streamActive = (): boolean =>
   (activity ??= createStreamActivity(useChatRuntimeStore)).active();
@@ -128,9 +148,9 @@ const watchSilence = (instance: Worker): void => {
 };
 
 function getWorker(patient = false): Worker | null {
-  if (idle) clearTimeout(idle);
   if (state === "unavailable") return null;
-  if (state === "stalled") return patient ? worker : null;
+  if (state === "stalled" && !patient) return null;
+  if (idle) clearTimeout(idle);
   if (worker) return worker;
   if (typeof Worker === "undefined") {
     state = "unavailable";
@@ -154,12 +174,17 @@ function getWorker(patient = false): Worker | null {
     if (instance !== worker) return;
     if ("ready" in data) {
       clearBoot(instance);
+      const late = state === "stalled";
       state = "ready";
       watchSilence(instance);
       if (listeners.size === 0) scheduleIdle();
+      if (late) announceRecovery();
       return;
     }
-    if (state === "stalled" && boot === null) state = "ready";
+    if (state === "stalled" && boot === null) {
+      state = "ready";
+      announceRecovery();
+    }
     listeners.get(data.client)?.(data);
     watchSilence(instance);
   };
@@ -226,6 +251,28 @@ export function requestFullHighlight(
   };
 }
 
+const requestSource = (
+  fence: string,
+  instance: Worker,
+  client: number,
+  source: string,
+): ReasoningHighlightRequest["source"] => {
+  const held = fenceSources.get(fence);
+  const known = held?.worker === instance ? held : undefined;
+  const grows = known !== undefined && source.startsWith(known.source);
+  if (known === undefined || known.client === client || grows)
+    fenceSources.set(fence, { worker: instance, client, source });
+  if (grows)
+    return {
+      base: known.client,
+      from: known.source.length,
+      text: source.slice(known.source.length),
+    };
+  if (known?.source.startsWith(source))
+    return { base: known.client, from: source.length, text: "" };
+  return source;
+};
+
 const fallbackQueue: (() => void)[] = [];
 let fallbackPending: (() => void) | null = null;
 
@@ -260,6 +307,7 @@ const queueFallback = (job: () => void): (() => void) => {
 
 /** Text is synchronous; expensive grammar work must never hold up chat or scrolling. */
 export function useReasoningHighlight(
+  fence: string,
   source: string,
   language: string | null,
   lines: number[],
@@ -269,7 +317,7 @@ export function useReasoningHighlight(
   const [tokens, setTokens] = useState<ReasoningLineTokens>(() => new Map());
   const client = useRef<number | null>(null);
   const revision = useRef(0);
-  const sent = useRef<{ worker: Worker; source: string } | null>(null);
+  const recovery = useSyncExternalStore(subscribeRecovery, recoveryCount);
   const lineKey = lines.join(",");
   useEffect(() => {
     if (lineKey === "") return;
@@ -299,7 +347,6 @@ export function useReasoningHighlight(
     let cancelFallback: (() => void) | undefined;
     listeners.set(id, (reply) => {
       if (reply.failed) {
-        sent.current = null;
         if (revision.current !== version) return;
         cancelFallback = runFallback();
         return;
@@ -310,27 +357,20 @@ export function useReasoningHighlight(
     const request: ReasoningHighlightRequest = {
       client: id,
       revision: version,
-      source:
-        sent.current?.worker === instance &&
-        source.startsWith(sent.current.source)
-          ? {
-              from: sent.current.source.length,
-              text: source.slice(sent.current.source.length),
-            }
-          : source,
+      source: requestSource(fence, instance, id, source),
       language,
       lines: wanted,
       ...(exact ? { exact: true } : {}),
     };
     instance.postMessage(request);
-    sent.current = { worker: instance, source };
     return () => cancelFallback?.();
-  }, [source, language, lineKey, fallback, exact]);
+  }, [fence, source, language, lineKey, fallback, exact, recovery]);
   useEffect(
     () => () => {
       revision.current += 1;
       if (client.current !== null) {
-        sent.current = null;
+        for (const [fence, held] of fenceSources)
+          if (held.client === client.current) fenceSources.delete(fence);
         listeners.delete(client.current);
         worker?.postMessage({ cancel: client.current });
       }

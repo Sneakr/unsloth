@@ -21,6 +21,7 @@ type Draft = {
 function mountDraft(value: number, onDraft?: (value: number | null) => void) {
   const slots: unknown[] = [];
   const synced: unknown[] = [];
+  const cleanups: (() => void)[] = [];
   let cursor = 0;
   let flushing = false;
   const react = {
@@ -39,6 +40,20 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
       const at = cursor++;
       if (!(at in slots)) slots[at] = { current: initial };
       return slots[at];
+    },
+    useEffectEvent: (handler: () => void) => {
+      const at = cursor++;
+      if (!(at in slots)) slots[at] = { handler, call: () => (slots[at] as { handler: () => void }).handler() };
+      const event = slots[at] as { handler: () => void; call: () => void };
+      event.handler = handler;
+      return event.call;
+    },
+    useEffect: (effect: () => (() => void) | void) => {
+      const at = cursor++;
+      if (at in slots) return;
+      slots[at] = true;
+      const cleanup = effect();
+      if (cleanup) cleanups.push(cleanup);
     },
   };
   const { useSliderDraft } = loadWithStubs<{
@@ -62,7 +77,10 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
     cursor = 0;
     return useSliderDraft(value, (next) => commits.push(next), onDraft);
   };
-  return { render: SliderRow, commits, synced };
+  const unmount = () => {
+    for (const cleanup of cleanups) cleanup();
+  };
+  return { render: SliderRow, commits, synced, unmount };
 }
 
 test("a drag moves the thumb locally and hands its owner one settled value", () => {
@@ -117,6 +135,23 @@ test("a drag cut short keeps the value it reached, as a native range input does"
   render().sliderProps.onLostPointerCapture();
   assert.deepEqual(commits, [0.8], "a pointercancel or a stolen capture threw the drag away");
   assert.equal(render().draft, null);
+});
+
+test("a drag whose row goes away keeps the value it reached, as main's live writes did", () => {
+  const previews: (number | null)[] = [];
+  const cut = mountDraft(0.5, (next) => previews.push(next));
+  cut.render().sliderProps.onPointerDown();
+  cut.render().sliderProps.onValueChange([0.8]);
+  cut.unmount();
+  assert.deepEqual(cut.commits, [0.8], "Escape closed the model picker mid-drag and dropped the dragged value");
+  assert.deepEqual(previews, [0.8, null], "an owner that follows the drag hears that it ended");
+
+  const ended = mountDraft(0.5);
+  ended.render().sliderProps.onPointerDown();
+  ended.render().sliderProps.onValueChange([0.8]);
+  ended.render().sliderProps.onLostPointerCapture();
+  ended.unmount();
+  assert.deepEqual(ended.commits, [0.8], "a drag that already ended is not committed twice");
 });
 
 test("an owner can follow the drag and hears when it ends", () => {

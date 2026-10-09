@@ -15,6 +15,14 @@ type Client = {
     patient?: boolean,
   ) => (() => void) | null;
   highlightWorkerState: () => string;
+  useReasoningHighlight: (
+    fence: string,
+    source: string,
+    language: string | null,
+    lines: number[],
+    fallback: null,
+    exact: boolean,
+  ) => Map<number, unknown>;
 };
 
 class FakeWorker {
@@ -54,7 +62,13 @@ const MESSAGES = loadWithStubs<Record<string, unknown>>(
   {},
 );
 
-function setup(t: TestContext): { client: Client; drain: () => void } {
+const INERT_REACT = {
+  useEffect: () => {},
+  useRef: () => ({ current: null }),
+  useState: () => [null, () => {}],
+};
+
+function setup(t: TestContext, react: object = INERT_REACT): { client: Client; drain: () => void } {
   FakeWorker.made = [];
   const scope = globalThis as { Worker?: unknown };
   scope.Worker = FakeWorker;
@@ -66,11 +80,14 @@ function setup(t: TestContext): { client: Client; drain: () => void } {
   const client = loadWithStubs<Client>(
     new URL("../src/components/assistant-ui/use-reasoning-highlight.ts", import.meta.url),
     {
-      react: { useEffect: () => {}, useRef: () => ({ current: null }), useState: () => [null, () => {}] },
+      react,
       "@/features/chat": { useChatRuntimeStore: {} },
       "@/lib/schedule-idle-task": { scheduleQuietIdleTask: () => () => {}, inputQuietIn: () => 0 },
       "./reasoning-highlight": MESSAGES,
-      "./reasoning-line-tokens": { mergeLineTokens: () => new Map() },
+      "./reasoning-line-tokens": {
+        mergeLineTokens: (_: unknown, lines: { line: number; tokens: unknown }[]) =>
+          new Map(lines.map(({ line, tokens }) => [line, tokens])),
+      },
       "./stream-activity": { createStreamActivity: () => ({ active: () => false }) },
     },
   );
@@ -233,9 +250,116 @@ test("a late worker that idles out is replaced, so the next long fence is colour
   await settleChannels(client);
   assert.equal(client.highlightWorkerState(), "stalled");
   cancel();
-  t.mock.timers.tick(10_000);
-  assert.equal(late.terminated, true, "with nothing left waiting, the late worker idles out");
+  t.mock.timers.tick(5_000);
+  assert.equal(client.requestFullHighlight("<p></p>", "html", () => {}, false, false), null);
+  t.mock.timers.tick(5_000);
+  assert.equal(late.terminated, true, "with nothing left waiting, the late worker idles out, however many callers it turned away meanwhile");
   assert.equal(client.highlightWorkerState(), "untested");
   assert.ok(client.requestFullHighlight("<html></html>", "html", () => {}), "the next long fence gets a worker again");
   assert.equal(FakeWorker.made.length, 2);
+});
+
+function hookRunner() {
+  let stale = false;
+  let slots: unknown[] = [];
+  let cursor = 0;
+  let pending: (() => void)[] = [];
+  const react = {
+    useState: (initial: unknown) => {
+      const at = cursor++;
+      const own = slots;
+      if (!(at in own)) own[at] = typeof initial === "function" ? initial() : initial;
+      const set = (next: unknown) => {
+        own[at] = typeof next === "function" ? next(own[at]) : next;
+      };
+      return [own[at], set];
+    },
+    useRef: (initial: unknown) => {
+      const at = cursor++;
+      if (!(at in slots)) slots[at] = { current: initial };
+      return slots[at];
+    },
+    useSyncExternalStore: (subscribe: (listener: () => void) => () => void, snapshot: () => unknown) => {
+      const at = cursor++;
+      if (!(at in slots)) slots[at] = { cleanup: subscribe(() => (stale = true)) };
+      return snapshot();
+    },
+    useEffect: (effect: () => unknown, deps: unknown[]) => {
+      const at = cursor++;
+      const own = slots;
+      const known = own[at] as { deps: unknown[]; cleanup: unknown } | undefined;
+      if (known && deps.every((dep, i) => Object.is(dep, known.deps[i]))) return;
+      pending.push(() => {
+        if (typeof known?.cleanup === "function") known.cleanup();
+        own[at] = { deps, cleanup: effect() };
+      });
+    },
+  };
+  function mount<T>(hook: () => T) {
+    const own: unknown[] = [];
+    const render = (): T => {
+      slots = own;
+      cursor = 0;
+      pending = [];
+      const rendered = hook();
+      for (const run of pending) run();
+      return rendered;
+    };
+    const unmount = () => {
+      for (const slot of own) {
+        const cleanup = (slot as { cleanup?: unknown } | undefined)?.cleanup;
+        if (typeof cleanup === "function") cleanup();
+      }
+    };
+    return { render, unmount };
+  }
+  return { react, mount, stale: () => stale };
+}
+
+test("thinking code the late worker failed or turned away asks again once it answers", async (t) => {
+  const hooks = hookRunner();
+  const { client, drain } = setup(t, hooks.react);
+  const source = "const answer = 42;";
+  const asked = hooks.mount(() => client.useReasoningHighlight("m:0:0", source, "javascript", [0], null, true)).render;
+  const turnedAway = hooks.mount(() => client.useReasoningHighlight("m:0:0", source, "javascript", [0], null, true)).render;
+  asked();
+  const [late] = FakeWorker.made;
+  await stallBoot(t, client);
+  drain();
+  turnedAway();
+  assert.deepEqual(late.requests(), [1], "a group that mounts while the worker is late is not queued on it");
+  assert.equal(hooks.stale(), false);
+  late.send({ ready: true });
+  assert.equal(hooks.stale(), true, "a fence too long for the main thread had no other way back to colour than a reopen");
+  asked();
+  turnedAway();
+  assert.deepEqual(late.requests(), [1, 1, 2]);
+  const tokens = [{ content: source, color: "#c00" }];
+  late.send({ client: 1, revision: 2, lines: [{ line: 0, tokens }] });
+  assert.deepEqual(asked().get(0), tokens);
+});
+
+test("every group of a fence edits the source the worker already holds, so the fence is sent once", (t) => {
+  const hooks = hookRunner();
+  const { client } = setup(t, hooks.react);
+  const head = "const a = 1;\n";
+  const grown = `${head}const b = 2;\n`;
+  const group = (fence: string, source: string, line: number) =>
+    hooks.mount(() => client.useReasoningHighlight(fence, source, "javascript", [line], null, true));
+  group("m:0:9", head, 0).render();
+  const [instance] = FakeWorker.made;
+  const tail = group("m:0:9", grown, 1);
+  tail.render();
+  group("m:0:9", head, 0).render();
+  tail.unmount();
+  group("m:0:9", grown, 1).render();
+  group("m:0:99", head, 0).render();
+  const sources = instance.posted.flatMap((message) => ("source" in message ? [message.source] : []));
+  assert.deepEqual(sources, [
+    head,
+    { base: 1, from: head.length, text: "const b = 2;\n" },
+    { base: 2, from: head.length, text: "" },
+    grown,
+    head,
+  ], "a group whose base went away, and another fence, send their whole source");
 });

@@ -864,6 +864,7 @@ export const FenceLine = memo(function FenceLine({
 const windowedFences = new Set<() => void>();
 let windowFrame = 0;
 let windowWatched = false;
+let findBarObserver: MutationObserver | null = null;
 let frameRects: Map<Element, DOMRect> | null = null;
 let frameFlying: Map<Element | null, boolean> | null = null;
 let frameSettle = false;
@@ -1012,6 +1013,12 @@ const remeasureWindows = (): void => {
 /** Is a print in progress? While it is, every fence renders every line highlighted. */
 export const fencePrinting = (): boolean => printing;
 
+const FIND_BAR_FLAG = "data-find-bar-open";
+
+const findBarOpen = (): boolean =>
+  typeof document !== "undefined"
+  && document.documentElement.hasAttribute(FIND_BAR_FLAG);
+
 /*
  * Synchronous, and inside `flushSync`, for the same reason `latchNow` is: a normally scheduled
  * update lands after the next paint, and there is no next paint before the print snapshot.
@@ -1093,6 +1100,11 @@ const watchWindows = (): void => {
   document.addEventListener("selectionchange", onSelectionChange, {
     passive: true,
   });
+  findBarObserver = new MutationObserver(scheduleRemeasure);
+  findBarObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: [FIND_BAR_FLAG],
+  });
 };
 
 const unwatchWindows = (): void => {
@@ -1110,6 +1122,8 @@ const unwatchWindows = (): void => {
   window.removeEventListener("pointermove", onPointerMove, { capture: true });
   window.removeEventListener("blur", releasePointer);
   document.removeEventListener("selectionchange", onSelectionChange);
+  findBarObserver?.disconnect();
+  findBarObserver = null;
   pointerHeld = null;
   heldLastFrame = false;
   if (windowFrame !== 0) {
@@ -1269,7 +1283,7 @@ function useLineWindow(
     const body = surface.current;
     if (!node || !outer || !body) return;
     if (lines.current <= WINDOW_CAP_LINES && current.current === null) return;
-    if (printing) {
+    if (printing || findBarOpen()) {
       if (current.current === null && pinned.current === null) return;
       current.current = null;
       pinned.current = null;
@@ -1361,7 +1375,7 @@ function useLineWindow(
 
   if (!enabled) return NO_WINDOW;
   if (state.measured) return state;
-  return overCap && !printing ? EMPTY_WINDOW : NO_WINDOW;
+  return overCap && !printing && !findBarOpen() ? EMPTY_WINDOW : NO_WINDOW;
 }
 
 const NO_WINDOW = { window: null, pins: null, measured: false } as const;

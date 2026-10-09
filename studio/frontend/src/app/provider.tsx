@@ -121,12 +121,12 @@ const STACK_CARD_INSET_RIGHT = 16;
 // Rail stays flush with the corner; only its padding grows past the open Run settings panel.
 const STACK_CARD_INSET_RIGHT_PAST_PANEL = `calc(${STACK_CARD_INSET_RIGHT}px + var(${CHAT_SETTINGS_INSET_VAR}, 0px))`;
 
-// macos page zoom does not change dpr; windows already includes zoom in its dpr.
 function BlockingScreenFlag() {
   useDocumentFlag("data-blocking-screen-open", true);
   return null;
 }
 
+// macos page zoom does not change dpr; windows already includes zoom in its dpr.
 function logicalPerCssPx(monitorScale: number): number {
   const zoom = Math.max(1, getAppliedInterfaceZoom());
   if (typeof window === "undefined" || !(monitorScale > 0)) return zoom;

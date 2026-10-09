@@ -39,7 +39,7 @@ import { defineContainmentFlag } from "../src/components/assistant-ui/containmen
 
 import { readSrc } from "./helpers/kit.ts";
 
-const geometry = { width: 640, lineHeight: 24, fontPixels: 15 };
+const geometry = { width: 640, lineHeight: 24, fontPixels: 15, codeLineHeight: 18.9, codeFontPixels: 12.2, codeFooter: 12.25 };
 
 test("a hidden fragment has no height and prose loses its paragraph gap", () => {
   assert.equal(estimateFragmentHeight({ text: "x", first: true, last: false, hidden: true }, geometry), 0);
@@ -49,12 +49,15 @@ test("a hidden fragment has no height and prose loses its paragraph gap", () => 
   assert.equal(first, prose + 16, "the first fragment carries the pane's top padding");
 });
 
-test("a code fragment is sized per line with its header and footer", () => {
+test("a code fragment is sized per line of the code block, with its header and footer", () => {
   const code = { source: "a\nb", incomplete: false, language: "ts", lines: [] };
   const middle = estimateFragmentHeight({ text: "a\nb", first: false, last: false, code }, geometry);
-  assert.equal(middle, 2 * 24);
+  assert.equal(middle, 2 * 18.9, "code lines at the prose line height reserved 13% too much, and a reader following a stream was clamped up when the rows mounted");
   const whole = estimateFragmentHeight({ text: "a\nb", first: true, last: true, code }, geometry);
-  assert.equal(whole, 2 * 24 + 40 + 16);
+  assert.equal(whole, 2 * 18.9 + 40 + 12.25, "and the footer is the measured one, never more");
+  const transcript = readSrc("components/assistant-ui/reasoning-transcript.tsx");
+  assert.match(transcript, /<div\s+ref=\{codeProbe\}\s+aria-hidden\s+className="aui-reasoning-code-fragment aui-reasoning-code-last pointer-events-none invisible absolute"\s*>\s*<div className="aui-reasoning-code-lines" \/>\s*<\/div>/, "the metrics come from the code block's own rules, chosen font size included");
+  assert.equal((transcript.match(/measureGeometry\(element, codeProbe\.current\)/g) ?? []).length, 2);
 });
 
 test("long lines wrap into the estimate at the measured column count", () => {

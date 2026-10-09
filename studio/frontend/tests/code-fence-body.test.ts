@@ -236,7 +236,7 @@ test("a print colours the whole fence, and the window comes back afterwards", ()
     "synchronously, because there is no next paint before the print snapshot",
   );
   assert.ok(
-    /if \(printing\) \{\s*if \(current\.current === null && pinned\.current === null\) return;/.test(DEFER),
+    /if \(printing \|\| findBarOpen\(\)\) \{\s*if \(current\.current === null && pinned\.current === null\) return;/.test(DEFER),
     "and the measurement has to honour it",
   );
 });

@@ -261,9 +261,8 @@ export function isContinuableContent(
       continue;
     }
     if (type === "reasoning") {
-      const reasoning = (part as { text?: string }).text ?? "";
       hasReasoning =
-        hasReasoning || reasoning.length > 256 || reasoning.trim().length > 0;
+        hasReasoning || ((part as { text?: string }).text ?? "").trim().length > 0;
       continue;
     }
     // Citations are never replayed, so they neither block nor enable.

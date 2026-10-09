@@ -7,6 +7,9 @@ export type FragmentGeometry = {
   width: number;
   lineHeight: number;
   fontPixels: number;
+  codeLineHeight: number;
+  codeFontPixels: number;
+  codeFooter: number;
 };
 
 export const INITIAL_VIEWPORTS = 1;
@@ -38,8 +41,9 @@ export const estimateFragmentHeight = (
   const columns = Math.max(
     12,
     Math.floor(
-      (geometry.width - (code ? 32 : 0)) /
-        (geometry.fontPixels * (code ? 0.58 : 0.48)),
+      code
+        ? (geometry.width - 32) / (geometry.codeFontPixels * 0.58)
+        : geometry.width / (geometry.fontPixels * 0.48),
     ),
   );
   const lines = fragment.text
@@ -49,9 +53,9 @@ export const estimateFragmentHeight = (
       0,
     );
   return code
-    ? lines * geometry.lineHeight +
+    ? lines * geometry.codeLineHeight +
         (fragment.first ? 40 : 0) +
-        (fragment.last ? 16 : 0)
+        (fragment.last ? geometry.codeFooter : 0)
     : Math.max(1, lines - 2) * geometry.lineHeight +
         (fragment.first ? 16 : 0);
 };

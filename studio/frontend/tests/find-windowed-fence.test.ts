@@ -18,3 +18,20 @@ test("stepping onto a match whose text a line window swapped out rebuilds the in
     "a windowed fence swaps a line between one text node and its token spans as the reader moves, and the throttled rebuild came too late for a quick Enter",
   );
 });
+
+test("while the find bar is open a long fence renders every line, so the highlights keep their text", () => {
+  const defer = readSrc("components/assistant-ui/code-fence-defer.tsx");
+  assert.match(
+    readSrc("features/find-in-page/components/find-in-page.tsx"),
+    /useDocumentFlag\("data-find-bar-open", enabled && open && foreground\);/,
+  );
+  assert.match(defer, /const FIND_BAR_FLAG = "data-find-bar-open";/);
+  assert.match(
+    defer,
+    /findBarObserver = new MutationObserver\(scheduleRemeasure\);\s*findBarObserver\.observe\(document\.documentElement, \{\s*attributes: true,\s*attributeFilter: \[FIND_BAR_FLAG\],\s*\}\);/,
+    "find paints live ranges over a line's text, and a window move swapped that text for token spans, so the highlights vanished until the index was rebuilt",
+  );
+  assert.ok(defer.indexOf("findBarObserver?.disconnect();") > defer.indexOf("const unwatchWindows = "));
+  assert.match(defer, /if \(printing \|\| findBarOpen\(\)\) \{\s*if \(current\.current === null && pinned\.current === null\) return;/);
+  assert.ok(defer.includes("return overCap && !printing && !findBarOpen() ? EMPTY_WINDOW : NO_WINDOW;"), "a fence that mounts while the bar is open starts unwindowed");
+});

@@ -77,16 +77,44 @@ test("a thinking code group the stream has moved past gets every line coloured, 
   assert.ok([120, 121].every((line) => coloured(tail.get(line))), "the growing tail still receives its queued refresh");
 });
 
+test("a code group's first request edits the source another group of its fence already sent", async (t) => {
+  const worker = startWorker(t);
+  const head = code(0, 40);
+  const grown = `${head}\n${code(40, 20)}`;
+  worker.send({ client: 1, revision: 1, source: head, language: "javascript", lines: range(0, 40), exact: true });
+  worker.send({ client: 2, revision: 1, source: { base: 1, from: head.length, text: grown.slice(head.length) }, language: "javascript", lines: range(40, 20), exact: true });
+  worker.send({ client: 3, revision: 1, source: { base: 2, from: head.length, text: "" }, language: "javascript", lines: range(30, 10), exact: true });
+  const shown = (client: number, line: number) => (worker.latest(client).get(line) ?? []).map((token) => token.content).join("");
+  const expected = (line: number) => code(line, 1);
+  const done = () => range(40, 20).every((line) => shown(2, line) === expected(line)) && range(30, 10).every((line) => shown(3, line) === expected(line));
+  await until(done);
+  assert.ok(done(), "the worker rebuilt each group's source from the one it already held");
+  assert.ok(range(40, 20).every((line) => coloured(worker.latest(2).get(line))));
+});
+
 test("only the growing tail of a fence may take the throttled colours, and a finished fence shares one source", () => {
   assert.match(TRANSCRIPT, /const growing = streaming && code\.incomplete;\s*const frozen = growing && !last\.last;/);
   assert.match(TRANSCRIPT, /if \(frozen \? stableSource\?\.key !== last\.key : stableSource !== null\)\s*setStableSource\(frozen \? \{ key: last\.key, source: code\.source \} : null\);/, "a group keeps the prefix it finished with only while the fence grows, then drops it");
   assert.match(TRANSCRIPT, /: fallback,\s*!growing \|\| !last\.last,\s*\);/, "every other group asks for exact colours, since no later request of its own would refresh them");
   assert.match(HOOK, /lines: wanted,\s*\.\.\.\(exact \? \{ exact: true \} : \{\}\),\s*\};/);
-  assert.match(HOOK, /\}, \[source, language, lineKey, fallback, exact\]\);/);
+  assert.match(HOOK, /\}, \[fence, source, language, lineKey, fallback, exact, recovery\]\);/);
 });
 
 test("a code group the fence continues past owns the line break after it, in a block that is not a <pre>", () => {
   assert.match(TRANSCRIPT, /const breaksAfter =\s*!last\.last &&\s*fragments\[indices\[indices\.length - 1\] \+ 1\]\?\.code\?\.lines\[0\]\?\.column === 0;/);
   assert.match(TRANSCRIPT, /\{breaksAfter && "\\n"\}\s*<\/code>\s*<\/div>/, "a blank last line needs a break after it to take up its row, and a copy across the seam keeps it");
   assert.equal(TRANSCRIPT.includes('<pre className="!m-0 min-h-[1lh]'), false, "Firefox copies a blank line between two <pre> blocks");
+});
+
+test("a code group's block still reads as a passage and takes the chosen code size, as its <pre> did", () => {
+  assert.match(
+    readSrc("components/assistant-ui/reasoning-reading-anchor.ts"),
+    /const passages =\s*"p, pre, \.aui-reasoning-code-lines, li, /,
+    "with only thinking code on screen, a width change moved the reader by the whole height the trace above it gained",
+  );
+  assert.match(
+    readSrc("index.css"),
+    /html\[data-code-font-size\] :is\(pre, code, kbd, samp\),\nhtml\[data-code-font-size\] \.aui-reasoning-code-lines \{\n\tfont-size: var\(--custom-code-font-size\) !important;/,
+    "a smaller code font kept the block's default line spacing",
+  );
 });

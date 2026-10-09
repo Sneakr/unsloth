@@ -3,7 +3,8 @@
 
 import type { ReasoningReadingAnchor } from "./reasoning-transcript-index.ts";
 
-const passages = "p, pre, li, h1, h2, h3, h4, h5, h6, td, th";
+const passages =
+  "p, pre, .aui-reasoning-code-lines, li, h1, h2, h3, h4, h5, h6, td, th";
 
 function textNodes(root: Element): Text[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
