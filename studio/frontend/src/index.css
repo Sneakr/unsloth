@@ -4242,7 +4242,7 @@ html[data-chat-font] .aui-root {
 		border-bottom-left-radius: 1.5rem;
 		border-bottom-right-radius: 1.5rem;
 	}
-	.aui-reasoning-code-fragment pre,
+	.aui-reasoning-code-fragment .aui-reasoning-code-lines,
 	.aui-reasoning-code-fragment code {
 		font-family: var(--custom-code-font, "Fira Code", ui-monospace, monospace);
 	}
@@ -5259,10 +5259,6 @@ html.force-reduced-motion .sidebar-section-drop-line {
 }
 
 @supports selector(::-webkit-scrollbar) {
-	:root.client-windows {
-		--thread-scrollbar-gutter: calc(10px / var(--studio-interface-zoom, 1));
-	}
-
 	:root.client-windows .aui-thread-viewport {
 		scrollbar-width: thin;
 		scrollbar-color: transparent transparent !important;

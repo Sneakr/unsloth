@@ -6,8 +6,10 @@ import test from "node:test";
 
 import {
   LOW_DEVICE_SCALE_ATTRIBUTE,
+  THREAD_SCROLLBAR_GUTTER_PROPERTY,
   isLowDeviceScale,
   watchLowDeviceScale,
+  watchThreadScrollbarGutter,
 } from "../src/app/low-device-scale.ts";
 
 type Query = {
@@ -118,4 +120,31 @@ test("a watcher starting on a low-scale display flags it before the first change
   });
   assert.equal(world.flagged(), true);
   stop();
+});
+
+test("the thread gutter is the measured thin bar, measured again whenever the pixel ratio moves", () => {
+  const world = fakeWorld(1, 1);
+  const properties = new Map<string, string>();
+  const root = {
+    style: {
+      setProperty: (name: string, value: string) => void properties.set(name, value),
+      removeProperty: (name: string) => {
+        const value = properties.get(name) ?? "";
+        properties.delete(name);
+        return value;
+      },
+    },
+  };
+  let thickness = 10;
+  const stop = watchThreadScrollbarGutter({ source: world.source, measure: () => thickness, root });
+  assert.equal(properties.get(THREAD_SCROLLBAR_GUTTER_PROPERTY), "10px");
+
+  thickness = 8;
+  world.changeRatio(1.25);
+  assert.equal(properties.get(THREAD_SCROLLBAR_GUTTER_PROPERTY), "8px", "a 125% browser or desktop zoom keeps the bar's device size");
+  assert.equal(world.live().length, 1);
+
+  stop();
+  assert.equal(properties.has(THREAD_SCROLLBAR_GUTTER_PROPERTY), false, "the stylesheet's default is back once the watcher goes");
+  assert.equal(world.live().length, 0);
 });

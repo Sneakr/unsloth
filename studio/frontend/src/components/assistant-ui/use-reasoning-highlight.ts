@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { HighlightResult } from "@streamdown/code";
 import { useChatRuntimeStore } from "@/features/chat";
-import { inputQuietIn, scheduleIdleTask } from "@/lib/schedule-idle-task";
+import { inputQuietIn, scheduleQuietIdleTask } from "@/lib/schedule-idle-task";
 import {
   reasoningHighlightFailure,
   reasoningHighlightReply,
@@ -245,13 +245,13 @@ const drainFallback = (): void => {
   }
   fallbackQueue.shift()?.();
   if (fallbackQueue.length > 0) {
-    fallbackPending = scheduleIdleTask(drainFallback, 1000);
+    fallbackPending = scheduleQuietIdleTask(drainFallback, 1000);
   }
 };
 
 const queueFallback = (job: () => void): (() => void) => {
   fallbackQueue.push(job);
-  if (!fallbackPending) fallbackPending = scheduleIdleTask(drainFallback, 1000);
+  if (!fallbackPending) fallbackPending = scheduleQuietIdleTask(drainFallback, 1000);
   return () => {
     const at = fallbackQueue.indexOf(job);
     if (at >= 0) fallbackQueue.splice(at, 1);
@@ -264,6 +264,7 @@ export function useReasoningHighlight(
   language: string | null,
   lines: number[],
   fallback: ReasoningFallbackHighlight | null,
+  exact: boolean,
 ): ReasoningLineTokens {
   const [tokens, setTokens] = useState<ReasoningLineTokens>(() => new Map());
   const client = useRef<number | null>(null);
@@ -319,11 +320,12 @@ export function useReasoningHighlight(
           : source,
       language,
       lines: wanted,
+      ...(exact ? { exact: true } : {}),
     };
     instance.postMessage(request);
     sent.current = { worker: instance, source };
     return () => cancelFallback?.();
-  }, [source, language, lineKey, fallback]);
+  }, [source, language, lineKey, fallback, exact]);
   useEffect(
     () => () => {
       revision.current += 1;

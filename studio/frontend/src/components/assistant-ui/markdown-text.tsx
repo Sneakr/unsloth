@@ -1270,6 +1270,8 @@ function useCoalescedStreamingText(
   const pendingRef = useRef({ messageId, text });
   const rafRef = useRef<number | null>(null);
   const renderedAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const frameAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const frameIntervalRef = useRef(Number.POSITIVE_INFINITY);
   const measureFromRef = useRef<number | null>(null);
   const costRef = useRef(0);
   const yieldsRef = useRef(0);
@@ -1306,9 +1308,19 @@ function useCoalescedStreamingText(
 
     const render = (frameTime: number) => {
       rafRef.current = null;
+      if (frameTime > frameAtRef.current) {
+        frameIntervalRef.current = Math.min(
+          frameIntervalRef.current,
+          frameTime - frameAtRef.current,
+        );
+        frameAtRef.current = frameTime;
+      }
       if (
         frameTime - renderedAtRef.current <
-        Math.max(16, STREAMING_RENDER_DUTY * costRef.current)
+        Math.max(
+          16 - Math.min(frameIntervalRef.current, 16) / 2,
+          STREAMING_RENDER_DUTY * costRef.current,
+        )
       ) {
         rafRef.current = requestAnimationFrame(render);
         return;

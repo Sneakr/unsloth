@@ -35,7 +35,7 @@ import {
 import { planPrintTokenization } from "./code-fence-print";
 import { createFenceSpeculator } from "./fence-speculation";
 import { highlightWorkerState, streamActive } from "./use-reasoning-highlight";
-import { inputQuietIn, scheduleIdleTask } from "@/lib/schedule-idle-task";
+import { inputQuietIn, scheduleQuietIdleTask } from "@/lib/schedule-idle-task";
 import {
   MAX_CACHED_CHARACTERS,
   MAX_FENCES,
@@ -411,7 +411,7 @@ const rankGates = (gates: readonly FenceGate[]): number[] => {
 const SPECULATION_IN_FLIGHT = 3;
 
 const fenceSpeculator = createFenceSpeculator<FenceGate>({
-  idle: (callback, timeout) => scheduleIdleTask(callback, timeout),
+  idle: (callback, timeout) => scheduleQuietIdleTask(callback, timeout),
   wait: (callback, ms) => {
     const timer = setTimeout(callback, ms);
     return () => clearTimeout(timer);
@@ -1148,8 +1148,13 @@ if (typeof window !== "undefined") {
     intrinsicScale = 0;
   });
 }
+const intrinsicSizeSupported =
+  typeof CSS !== "undefined"
+  && typeof CSS.supports === "function"
+  && CSS.supports("contain-intrinsic-size", "0 1000px");
 
 const measureIntrinsicScale = (surface: HTMLElement): number => {
+  if (!intrinsicSizeSupported) return 1;
   if (intrinsicScale > 0) return intrinsicScale;
   const probe = document.createElement("div");
   probe.setAttribute("aria-hidden", "true");

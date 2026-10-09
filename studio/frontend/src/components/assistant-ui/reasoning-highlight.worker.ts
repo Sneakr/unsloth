@@ -79,7 +79,7 @@ self.onmessage ??= ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
           language: normalizeLanguage(request.language ?? "text"),
           themes: [...themes],
         };
-        const result = request.full
+        const result = request.full || request.exact
           ? highlighter.highlightExact(options, publish)
           : highlighter.highlight(options, publish);
         publish(result);

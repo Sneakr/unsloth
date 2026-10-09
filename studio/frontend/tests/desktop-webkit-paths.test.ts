@@ -38,10 +38,11 @@ test("a desktop zoom shows skipped content until WebKit has measured it at the n
   assert.match(store, /interfaceScaleApplicationQueue = Promise\.resolve\(\);\s*releaseContainmentAfterZoom\(\);\s*resolve\(\);/, "a setZoom that never settles must not leave every skipped block rendered");
 });
 
-test("the Windows thread gutter follows the native thin bar, which page zoom does not scale", () => {
-  const runtime = readSrc("features/settings/lib/interface-scale-runtime.ts");
-  assert.match(runtime, /appliedInterfaceZoom = zoom;\s*document\.documentElement\.style\.setProperty\("--studio-interface-zoom", String\(zoom\)\);/);
-  assert.match(readSrc("index.css"), /:root\.client-windows \{\s*--thread-scrollbar-gutter: calc\(10px \/ var\(--studio-interface-zoom, 1\)\);\s*\}/);
+test("the Windows thread gutter follows the native thin bar, which neither browser nor desktop zoom scales", () => {
+  const provider = readSrc("app/provider.tsx");
+  assert.match(provider, /root\.classList\.contains\("client-windows"\) &&\s*CSS\.supports\("selector\(::-webkit-scrollbar\)"\)\s*\? watchThreadScrollbarGutter\(\{\s*source,\s*measure: measureThinScrollbar,\s*root,\s*\}\)\s*: null;/, "measured where the thread's thin bar is in force, so a browser zoom in Unsloth Web is covered too");
+  assert.equal(readSrc("index.css").includes("--studio-interface-zoom"), false);
+  assert.equal(readSrc("features/settings/lib/interface-scale-runtime.ts").includes("--studio-interface-zoom"), false);
 });
 
 test("below 1.5x device scale the Windows thread scrolls on the compositor and keeps LCD text", () => {
@@ -54,7 +55,7 @@ test("below 1.5x device scale the Windows thread scrolls on the compositor and k
   const supports = css.lastIndexOf("@supports selector(::-webkit-scrollbar)", css.indexOf("[data-low-device-scale]"));
   assert.ok(supports > css.indexOf(".aui-thread-viewport {\n\t/* Reserve scrollbar space"), "the Chromium-only scrollbar block holds it, so Firefox keeps its own scrolling");
   const provider = readSrc("app/provider.tsx");
-  assert.match(provider, /return watchLowDeviceScale\(\{\s*source,\s*interfaceZoom: getAppliedInterfaceZoom,\s*subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,\s*root: document\.documentElement,\s*\}\);/, "the desktop divides its own page zoom out, since Chromium decides on the display's scale, not the zoomed ratio");
+  assert.match(provider, /const root = document\.documentElement;\s*const stopFlag = watchLowDeviceScale\(\{\s*source,\s*interfaceZoom: getAppliedInterfaceZoom,\s*subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,\s*root,\s*\}\);/, "the desktop divides its own page zoom out, since Chromium decides on the display's scale, not the zoomed ratio");
   assert.match(provider, /<AppearanceCustomizationEffect \/>\s*<LowDeviceScaleEffect \/>/);
 });
 

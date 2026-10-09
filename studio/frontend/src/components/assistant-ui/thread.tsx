@@ -25,7 +25,7 @@ import {
   type GrammarPrewarm,
 } from "@/components/assistant-ui/grammar-prewarm";
 import { streamActive } from "@/components/assistant-ui/use-reasoning-highlight";
-import { scheduleIdleTask } from "@/lib/schedule-idle-task";
+import { scheduleQuietIdleTask } from "@/lib/schedule-idle-task";
 import { MessageHtmlArtifacts } from "@/components/assistant-ui/message-html-artifacts";
 import {
   MessageResponseDetailsSheet,
@@ -1953,7 +1953,7 @@ const startGrammarPrewarm = (): void => {
   grammarPrewarm = createGrammarPrewarm(
     (code, language, late) => highlightFenceSource(code, language, late),
     {
-      idle: scheduleIdleTask,
+      idle: scheduleQuietIdleTask,
       wait: (callback, ms) => {
         const timer = setTimeout(callback, ms);
         return () => clearTimeout(timer);

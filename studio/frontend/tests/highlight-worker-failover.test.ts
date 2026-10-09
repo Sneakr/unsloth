@@ -62,7 +62,7 @@ test("a fence too long for the main thread stays plain without the worker, and t
   assert.ok(hook.lastIndexOf("highlight(body, late)") > hook.lastIndexOf("} else {"));
   assert.equal((hook.match(/code\.highlight\(/g) ?? []).length, 1);
   assert.match(hook, /const result = code\.highlightExact\(\s*fenceHighlightOptions\(body, languageToken\),\s*late,\s*\);/, "a print tokenizes the whole fence now, never the throttled approximation with a plain tail");
-  assert.match(WORKER, /const result = request\.full\s*\? highlighter\.highlightExact\(options, publish\)\s*: highlighter\.highlight\(options, publish\);/, "a whole-fence reply is exact, since the main thread seeds it as a permanent cache entry");
+  assert.match(WORKER, /const result = request\.full \|\| request\.exact\s*\? highlighter\.highlightExact\(options, publish\)\s*: highlighter\.highlight\(options, publish\);/, "a whole-fence reply is exact, since the main thread seeds it as a permanent cache entry, and so is a thinking code group no later request will refresh");
   assert.match(HOOK, /useEffect\(\(\) => \{\s*if \(lineKey === ""\) return;/);
   assert.ok(HOOK.includes("if (!instance) return runFallback();"));
   assert.match(HOOK, /if \(reply\.failed\) \{\s*sent\.current = null;\s*if \(revision\.current !== version\) return;\s*cancelFallback = runFallback\(\);\s*return;\s*\}/);

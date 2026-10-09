@@ -369,17 +369,21 @@ function CodeGroup({
   const code = fragments[indices[0]].code!;
   const first = fragments[indices[0]];
   const last = fragments[indices[indices.length - 1]];
-  const fenceContinues = !last.last;
+  const growing = streaming && code.incomplete;
+  const frozen = growing && !last.last;
   const [stableSource, setStableSource] = useState<{
     key: string;
     source: string;
   } | null>(null);
-  if (fenceContinues && stableSource?.key !== last.key)
-    setStableSource({ key: last.key, source: code.source });
+  if (frozen ? stableSource?.key !== last.key : stableSource !== null)
+    setStableSource(frozen ? { key: last.key, source: code.source } : null);
   const source =
-    fenceContinues && stableSource?.key === last.key
+    frozen && stableSource?.key === last.key
       ? stableSource.source
       : code.source;
+  const breaksAfter =
+    !last.last &&
+    fragments[indices[indices.length - 1] + 1]?.code?.lines[0]?.column === 0;
   useEffect(() => {
     const element = surface.current;
     if (!element || reached || typeof IntersectionObserver === "undefined")
@@ -417,6 +421,7 @@ function CodeGroup({
     code.incomplete || source.length > MAIN_THREAD_HIGHLIGHT_CHARS
       ? null
       : fallback,
+    !growing || !last.last,
   );
   return (
     <div
@@ -442,7 +447,7 @@ function CodeGroup({
           {code.language}
         </div>
       )}
-      <pre className="!m-0 min-h-[1lh] whitespace-pre-wrap [overflow-wrap:anywhere] font-mono">
+      <div className="aui-reasoning-code-lines !m-0 min-h-[1lh] whitespace-pre-wrap [overflow-wrap:anywhere] font-mono">
         <code>
           {indices.map((index, at) => (
             <span
@@ -458,8 +463,9 @@ function CodeGroup({
               />
             </span>
           ))}
+          {breaksAfter && "\n"}
         </code>
-      </pre>
+      </div>
     </div>
   );
 }

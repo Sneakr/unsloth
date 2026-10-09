@@ -8,6 +8,7 @@ import { loadWithStubs } from "./helpers/module-stubs.ts";
 
 type IdleModule = {
   scheduleIdleTask: (callback: () => void, timeout?: number) => () => void;
+  scheduleQuietIdleTask: (callback: () => void, timeout?: number) => () => void;
   inputQuietIn: () => number;
 };
 
@@ -38,17 +39,28 @@ function engine(t: TestContext, idle?: (callback: () => void) => number) {
   return { idleModule, advance, input, listeners };
 }
 
-test("without requestIdleCallback, a task runs soon when nothing is happening", (t) => {
+test("without requestIdleCallback, the shared scheduler keeps its 120 ms timer whatever the input", (t) => {
+  const { idleModule, advance, input } = engine(t);
+  let ran = 0;
+  input("pointerdown");
+  idleModule.scheduleIdleTask(() => (ran += 1), 1000);
+  advance(119);
+  assert.equal(ran, 0);
+  advance(2);
+  assert.equal(ran, 1, "settings, the hub readme and markdown previews wait no longer than on main");
+});
+
+test("without requestIdleCallback, a quiet task runs soon when nothing is happening", (t) => {
   const { idleModule, advance } = engine(t);
   let ran = 0;
-  idleModule.scheduleIdleTask(() => (ran += 1), 1000);
+  idleModule.scheduleQuietIdleTask(() => (ran += 1), 1000);
   advance(15);
   assert.equal(ran, 0);
   advance(2);
   assert.equal(ran, 1);
 });
 
-test("a task waits for input to go quiet, so it never lands in the middle of a scroll", (t) => {
+test("a quiet task waits for input to go quiet, so it never lands in the middle of a scroll", (t) => {
   const { idleModule, advance, input, listeners } = engine(t);
   for (const type of ["wheel", "scroll", "pointerdown", "keydown", "touchstart", "touchmove"]) {
     idleModule.inputQuietIn();
@@ -56,7 +68,7 @@ test("a task waits for input to go quiet, so it never lands in the middle of a s
   }
   let ran = 0;
   input("wheel");
-  idleModule.scheduleIdleTask(() => (ran += 1), 1000);
+  idleModule.scheduleQuietIdleTask(() => (ran += 1), 1000);
   advance(200);
   input("scroll");
   advance(299);
@@ -65,10 +77,10 @@ test("a task waits for input to go quiet, so it never lands in the middle of a s
   assert.equal(ran, 1);
 });
 
-test("continuous input cannot starve a task past its deadline", (t) => {
+test("continuous input cannot starve a quiet task past its deadline", (t) => {
   const { idleModule, advance, input } = engine(t);
   let ran = 0;
-  idleModule.scheduleIdleTask(() => (ran += 1), 500);
+  idleModule.scheduleQuietIdleTask(() => (ran += 1), 500);
   for (let at = 0; at < 480; at += 40) {
     input("wheel");
     advance(40);
@@ -80,12 +92,16 @@ test("continuous input cannot starve a task past its deadline", (t) => {
 });
 
 test("a cancelled task never runs", (t) => {
-  const { idleModule, advance } = engine(t);
+  const { idleModule, advance, input } = engine(t);
   let ran = 0;
-  const cancel = idleModule.scheduleIdleTask(() => (ran += 1), 1000);
+  idleModule.scheduleIdleTask(() => (ran += 1), 1000)();
+  idleModule.scheduleQuietIdleTask(() => (ran += 1), 1000)();
+  input("wheel");
+  const cancel = idleModule.scheduleQuietIdleTask(() => (ran += 1), 1000);
+  advance(100);
   cancel();
   advance(2000);
-  assert.equal(ran, 0);
+  assert.equal(ran, 0, "including a quiet task already waiting out input");
 });
 
 test("engines with requestIdleCallback keep it", (t) => {
@@ -93,9 +109,10 @@ test("engines with requestIdleCallback keep it", (t) => {
   const { idleModule, advance } = engine(t, (callback) => queued.push(callback));
   let ran = 0;
   idleModule.scheduleIdleTask(() => (ran += 1), 1000);
+  idleModule.scheduleQuietIdleTask(() => (ran += 1), 1000);
   advance(1000);
   assert.equal(ran, 0);
-  assert.equal(queued.length, 1);
-  queued[0]();
-  assert.equal(ran, 1);
+  assert.equal(queued.length, 2);
+  for (const callback of queued) callback();
+  assert.equal(ran, 2);
 });

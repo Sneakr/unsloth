@@ -45,3 +45,43 @@ export function watchLowDeviceScale(options: {
     root.removeAttribute(LOW_DEVICE_SCALE_ATTRIBUTE);
   };
 }
+
+export const THREAD_SCROLLBAR_GUTTER_PROPERTY = "--thread-scrollbar-gutter";
+
+type GutterRoot = {
+  style: {
+    setProperty: (name: string, value: string) => void;
+    removeProperty: (name: string) => string;
+  };
+};
+
+export function measureThinScrollbar(): number {
+  const probe = document.createElement("div");
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText =
+    "position:absolute;top:0;left:0;width:100px;height:1px;overflow-y:scroll;scrollbar-width:thin;scrollbar-color:transparent transparent;visibility:hidden;pointer-events:none";
+  const content = document.createElement("div");
+  probe.append(content);
+  document.body.append(probe);
+  const width =
+    probe.getBoundingClientRect().width - content.getBoundingClientRect().width;
+  probe.remove();
+  return width;
+}
+
+export function watchThreadScrollbarGutter(options: {
+  source: PixelRatioSource;
+  measure: () => number;
+  root: GutterRoot;
+}): () => void {
+  const { source, measure, root } = options;
+  const sync = () => {
+    root.style.setProperty(THREAD_SCROLLBAR_GUTTER_PROPERTY, `${measure()}px`);
+  };
+  sync();
+  const stopRatio = observeDevicePixelRatio(source, sync);
+  return () => {
+    stopRatio();
+    root.style.removeProperty(THREAD_SCROLLBAR_GUTTER_PROPERTY);
+  };
+}

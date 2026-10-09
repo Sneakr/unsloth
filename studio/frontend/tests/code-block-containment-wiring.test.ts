@@ -84,6 +84,7 @@ test("the component writes the measured height before paint and only when it cha
   assert.match(DEFER, /scrollbar: Math\.max\(0, surface\.offsetHeight - surface\.clientHeight - borders\)/, "a horizontal scrollbar is part of the box the skipped body must reproduce");
   assert.match(DEFER, /const height =\s*Math\.round\(\s*\(lines\.current \* known\.lineHeight \+ known\.scrollbar\) \* measureIntrinsicScale\(body\) \* 1000,\s*\) \/ 1000;/, "scaled where WebKit lays out contain-intrinsic-size lengths without the page zoom");
   assert.match(DEFER, /contain:size;contain-intrinsic-size:0 1000px/);
+  assert.match(DEFER, /CSS\.supports\("contain-intrinsic-size", "0 1000px"\);\s*const measureIntrinsicScale = \(surface: HTMLElement\): number => \{\s*if \(!intrinsicSizeSupported\) return 1;/, "an engine without contain-intrinsic-size probes nothing, since its probe measures 0 and would be inserted again on every measure");
   assert.match(DEFER, /window\.devicePixelRatio,\s*measureIntrinsicScale\(surface\),\s*\]\.join\("\|"\);/, "a page zoom WebKit hides from devicePixelRatio still re-probes the pitch");
   const measure = DEFER.slice(DEFER.indexOf("measure.current = () => {"), DEFER.indexOf("useLayoutEffect(() => {", DEFER.indexOf("measure.current = () => {")));
   assert.ok(measure.indexOf("setProperty(FENCE_HEIGHT_PROPERTY") < measure.indexOf("const reach ="), "written before the far-away early return, so a fence measured once always carries its height");

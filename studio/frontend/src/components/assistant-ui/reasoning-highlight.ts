@@ -10,6 +10,7 @@ export type ReasoningHighlightRequest = {
   language: string | null;
   lines: number[];
   full?: boolean;
+  exact?: boolean;
   speculative?: boolean;
 };
 

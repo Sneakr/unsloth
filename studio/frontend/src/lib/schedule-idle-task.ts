@@ -62,20 +62,35 @@ export function scheduleIdleTask(
     };
   }
 
+  const handle = globalThis.setTimeout(run, Math.min(timeout, 120));
+  return () => {
+    canceled = true;
+    globalThis.clearTimeout(handle);
+  };
+}
+
+export function scheduleQuietIdleTask(
+  callback: () => void,
+  timeout = 250,
+): () => void {
+  if (
+    typeof window === "undefined" ||
+    typeof window.requestIdleCallback === "function"
+  ) {
+    return scheduleIdleTask(callback, timeout);
+  }
+
   watchInput();
   const deadline = performance.now() + timeout;
-  let handle: ReturnType<typeof setTimeout> | undefined;
+  let handle: ReturnType<typeof setTimeout>;
   const attempt = (): void => {
     const wait = Math.min(inputQuietIn(), deadline - performance.now());
     if (wait > 0) {
       handle = globalThis.setTimeout(attempt, wait);
       return;
     }
-    run();
+    callback();
   };
   handle = globalThis.setTimeout(attempt, Math.min(timeout, 16));
-  return () => {
-    canceled = true;
-    globalThis.clearTimeout(handle);
-  };
+  return () => globalThis.clearTimeout(handle);
 }

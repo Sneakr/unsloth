@@ -59,7 +59,11 @@ import {
 import { Z_LAYER } from "@/lib/z-layers";
 import { useRouterState } from "@tanstack/react-router";
 import { setDesktopShellReady } from "./desktop-shell-ready";
-import { watchLowDeviceScale } from "./low-device-scale";
+import {
+  measureThinScrollbar,
+  watchLowDeviceScale,
+  watchThreadScrollbarGutter,
+} from "./low-device-scale";
 import { MotionConfig } from "motion/react";
 import {
   type CSSProperties,
@@ -1092,12 +1096,26 @@ function LowDeviceScaleEffect() {
   useEffect(() => {
     const source = windowPixelRatioSource();
     if (!source) return;
-    return watchLowDeviceScale({
+    const root = document.documentElement;
+    const stopFlag = watchLowDeviceScale({
       source,
       interfaceZoom: getAppliedInterfaceZoom,
       subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,
-      root: document.documentElement,
+      root,
     });
+    const stopGutter =
+      root.classList.contains("client-windows") &&
+      CSS.supports("selector(::-webkit-scrollbar)")
+        ? watchThreadScrollbarGutter({
+            source,
+            measure: measureThinScrollbar,
+            root,
+          })
+        : null;
+    return () => {
+      stopFlag();
+      stopGutter?.();
+    };
   }, []);
   return null;
 }

@@ -68,7 +68,7 @@ function setup(t: TestContext): { client: Client; drain: () => void } {
     {
       react: { useEffect: () => {}, useRef: () => ({ current: null }), useState: () => [null, () => {}] },
       "@/features/chat": { useChatRuntimeStore: {} },
-      "@/lib/schedule-idle-task": { scheduleIdleTask: () => () => {}, inputQuietIn: () => 0 },
+      "@/lib/schedule-idle-task": { scheduleQuietIdleTask: () => () => {}, inputQuietIn: () => 0 },
       "./reasoning-highlight": MESSAGES,
       "./reasoning-line-tokens": { mergeLineTokens: () => new Map() },
       "./stream-activity": { createStreamActivity: () => ({ active: () => false }) },

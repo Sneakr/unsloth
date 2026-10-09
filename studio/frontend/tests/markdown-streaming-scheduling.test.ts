@@ -129,10 +129,15 @@ test("stream updates are paint-coalesced with a cost-aware cadence and no length
 
   assert.ok(hook.includes("requestAnimationFrame"));
   assert.ok(!hook.includes("setTimeout"));
-  assert.ok(hook.includes("frameTime - renderedAtRef.current <\n        Math.max(16, STREAMING_RENDER_DUTY * costRef.current)"));
+  assert.match(hook, /if \(frameTime > frameAtRef\.current\) \{\s*frameIntervalRef\.current = Math\.min\(\s*frameIntervalRef\.current,\s*frameTime - frameAtRef\.current,\s*\);\s*frameAtRef\.current = frameTime;\s*\}/, "the shortest gap between frames is the display's frame interval");
+  assert.match(
+    hook,
+    /frameTime - renderedAtRef\.current <\s*Math\.max\(\s*16 - Math\.min\(frameIntervalRef\.current, 16\) \/ 2,\s*STREAMING_RENDER_DUTY \* costRef\.current,\s*\)/,
+    "frame times come in whole frames, so the 16 ms floor allows half a frame or a 75, 90 or 144 Hz display renders every second or third frame",
+  );
   assert.ok(
     hook.includes("costRef.current = performance.now() - from;"),
-    "the cost is the commit, not the wait for the next frame, or a 60 Hz display renders every third frame",
+    "the cost ends at the commit, not at the next frame, or a 60 Hz display renders every third frame",
   );
 
   // A running message can be replaced rather than appended to, as the audio
