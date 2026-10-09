@@ -159,10 +159,9 @@ test("the sidebar list measures its scroll rail", async () => {
     ) ?? []
   ).map((rule) => /scrollbar-width:\s*([^;}]+)/.exec(rule)?.[1].trim());
   assert.deepEqual(railWidthDecls, []);
-  assert.match(INDEX, /:root\.client-windows \* \{\s*scrollbar-width: auto;/);
   assert.match(
     INDEX,
-    /:root\.client-windows \.sidebar-scroll-fade:hover,\s*:root\.client-windows \.run-settings-scroll:hover,\s*:root\.client-windows \.hover-scrollbar:hover \{\s*scrollbar-color: auto !important;/,
+    /:root\.client-windows \* \{\s*scrollbar-width: auto;/,
   );
   assert.equal(
     /\.sidebar-scroll-fade::-webkit-scrollbar \{/.test(INDEX),

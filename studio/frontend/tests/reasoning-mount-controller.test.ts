@@ -25,9 +25,11 @@ import {
   CHUNK_MAX_GROUPS,
   initialRows,
   isCovered,
+  rowAtSamePlace,
   widenBudget,
   widenRows,
 } from "../src/components/assistant-ui/reasoning-mount-controller.ts";
+import { ReasoningTranscriptIndex } from "../src/components/assistant-ui/reasoning-transcript-index.ts";
 import {
   REASONING_ROW_CONTAINMENT,
   REASONING_ROW_CONTAINMENT_ATTRIBUTE,
@@ -257,6 +259,23 @@ test("islands only grow, keep their identity, and stay listed after the prefix p
   assert.equal(addIsland(islands, { start: 0, end: 20 }, 30), islands, "rows the prefix already holds are never an island");
   assert.deepEqual(addIsland(islands, { start: 100, end: 110 }, 96), [...islands, { id: 100, start: 100, end: 110 }], "islands the prefix passed stay listed, so their spacers keep their place");
   assert.deepEqual(addIsland(addIsland(NO_ISLANDS, { start: 5, end: 15 }, 0), { start: 5, end: 40 }, 30).map((island) => island.id), [5, 30], "an island is named by the first row it mounts, so a request clipped by the prefix cannot reuse another island's name");
+});
+
+test("a rewrite that re-keys every row still finds each row at its place in the trace", () => {
+  const code = Array.from({ length: 600 }, (_, i) => `const line${i} = ${i};`).join("\n");
+  const trace = `First thought.\n\n\`\`\`javascript\n${code}\n\`\`\`\n\nLast thought.`;
+  const index = new ReasoningTranscriptIndex();
+  const before = index.update([`${trace} </thi`]);
+  const after = index.update([trace]);
+  const prose = before[0];
+  const codeRow = before.find((fragment) => (fragment.code?.lines[0]?.line ?? 0) > 0);
+  assert.ok(codeRow, "the fence spans several code rows");
+  for (const row of [prose, codeRow]) {
+    const at = rowAtSamePlace(after, row);
+    assert.notEqual(after[at].key, row.key, "a split closing tag rewrote the trace, so every key changed");
+    assert.equal(after[at].text, row.text);
+  }
+  assert.equal(rowAtSamePlace(after, { ...prose, start: prose.start + 1 }), -1);
 });
 
 test("mounted ranges merge the prefix with the islands and clip to the trace", () => {

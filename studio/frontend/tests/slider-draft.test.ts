@@ -11,12 +11,14 @@ type Draft = {
   draft: number | null;
   sliderProps: {
     value: number[];
-    onPointerDown: () => void;
+    onPointerDown: (event: { pointerId: number }) => void;
     onValueChange: (value: number[]) => void;
     onValueCommit: (value: number[]) => void;
-    onLostPointerCapture: () => void;
+    onLostPointerCapture: (event: { pointerId: number }) => void;
   };
 };
+
+const FINGER = { pointerId: 1 };
 
 function mountDraft(value: number, onDraft?: (value: number | null) => void) {
   const slots: unknown[] = [];
@@ -85,7 +87,7 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
 
 test("a drag moves the thumb locally and hands its owner one settled value", () => {
   const { render, commits } = mountDraft(0.5);
-  render().sliderProps.onPointerDown();
+  render().sliderProps.onPointerDown(FINGER);
   render().sliderProps.onValueChange([0.6]);
   render().sliderProps.onValueChange([0.7]);
   const dragging = render();
@@ -94,25 +96,25 @@ test("a drag moves the thumb locally and hands its owner one settled value", () 
   assert.deepEqual(commits, [], "the owner re-renders once per drag, not once per pointer move");
 
   dragging.sliderProps.onValueCommit([0.7]);
-  dragging.sliderProps.onLostPointerCapture();
+  dragging.sliderProps.onLostPointerCapture(FINGER);
   assert.deepEqual(commits, [0.7], "Radix's own commit at release is not a second one");
   assert.equal(render().draft, null);
 });
 
 test("a release right behind the last move commits that move", () => {
   const { render, commits } = mountDraft(0.5);
-  render().sliderProps.onPointerDown();
+  render().sliderProps.onPointerDown(FINGER);
   const row = render();
   row.sliderProps.onValueChange([0.6]);
   row.sliderProps.onValueChange([0.9]);
   row.sliderProps.onValueCommit([0.6]);
-  row.sliderProps.onLostPointerCapture();
+  row.sliderProps.onLostPointerCapture(FINGER);
   assert.deepEqual(commits, [0.9], "Radix commits the value its last render saw, a move behind the pointer");
 });
 
 test("each move is drawn in the frame it arrives in", () => {
   const { render, synced } = mountDraft(0.5);
-  render().sliderProps.onPointerDown();
+  render().sliderProps.onPointerDown(FINGER);
   render().sliderProps.onValueChange([0.6]);
   render().sliderProps.onValueChange([0.9]);
   assert.deepEqual(synced, [0.6, 0.9], "a plain state update waits for a later task and trails the pointer by a frame");
@@ -120,19 +122,19 @@ test("each move is drawn in the frame it arrives in", () => {
 
 test("a drag that ends where it started commits nothing and leaves no draft", () => {
   const { render, commits } = mountDraft(0.5);
-  render().sliderProps.onPointerDown();
+  render().sliderProps.onPointerDown(FINGER);
   render().sliderProps.onValueChange([0.6]);
   render().sliderProps.onValueChange([0.5]);
-  render().sliderProps.onLostPointerCapture();
+  render().sliderProps.onLostPointerCapture(FINGER);
   assert.equal(render().draft, null);
   assert.deepEqual(commits, []);
 });
 
 test("a drag cut short keeps the value it reached, as a native range input does", () => {
   const { render, commits } = mountDraft(0.5);
-  render().sliderProps.onPointerDown();
+  render().sliderProps.onPointerDown(FINGER);
   render().sliderProps.onValueChange([0.8]);
-  render().sliderProps.onLostPointerCapture();
+  render().sliderProps.onLostPointerCapture(FINGER);
   assert.deepEqual(commits, [0.8], "a pointercancel or a stolen capture threw the drag away");
   assert.equal(render().draft, null);
 });
@@ -140,27 +142,42 @@ test("a drag cut short keeps the value it reached, as a native range input does"
 test("a drag whose row goes away keeps the value it reached, as main's live writes did", () => {
   const previews: (number | null)[] = [];
   const cut = mountDraft(0.5, (next) => previews.push(next));
-  cut.render().sliderProps.onPointerDown();
+  cut.render().sliderProps.onPointerDown(FINGER);
   cut.render().sliderProps.onValueChange([0.8]);
   cut.unmount();
   assert.deepEqual(cut.commits, [0.8], "Escape closed the model picker mid-drag and dropped the dragged value");
   assert.deepEqual(previews, [0.8, null], "an owner that follows the drag hears that it ended");
 
   const ended = mountDraft(0.5);
-  ended.render().sliderProps.onPointerDown();
+  ended.render().sliderProps.onPointerDown(FINGER);
   ended.render().sliderProps.onValueChange([0.8]);
-  ended.render().sliderProps.onLostPointerCapture();
+  ended.render().sliderProps.onLostPointerCapture(FINGER);
   ended.unmount();
   assert.deepEqual(ended.commits, [0.8], "a drag that already ended is not committed twice");
+});
+
+test("a second finger on the slider keeps the drag going after the first one lifts", () => {
+  const { render, commits } = mountDraft(0.5);
+  render().sliderProps.onPointerDown(FINGER);
+  render().sliderProps.onPointerDown({ pointerId: 2 });
+  render().sliderProps.onValueChange([0.6]);
+  render().sliderProps.onValueCommit([0.6]);
+  render().sliderProps.onLostPointerCapture(FINGER);
+  render().sliderProps.onValueChange([0.8]);
+  assert.equal(render().draft, 0.8, "the second finger's moves were dropped once the first one lifted");
+  assert.deepEqual(commits, []);
+  render().sliderProps.onLostPointerCapture({ pointerId: 2 });
+  assert.deepEqual(commits, [0.8]);
+  assert.equal(render().draft, null);
 });
 
 test("an owner can follow the drag and hears when it ends", () => {
   const previews: (number | null)[] = [];
   const { render } = mountDraft(10, (next) => previews.push(next));
-  render().sliderProps.onPointerDown();
+  render().sliderProps.onPointerDown(FINGER);
   render().sliderProps.onValueChange([12]);
   render().sliderProps.onValueChange([14]);
-  render().sliderProps.onLostPointerCapture();
+  render().sliderProps.onLostPointerCapture(FINGER);
   assert.deepEqual(previews, [12, 14, null]);
 });
 

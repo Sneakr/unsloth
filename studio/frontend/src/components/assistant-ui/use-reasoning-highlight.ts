@@ -273,6 +273,11 @@ const requestSource = (
   return source;
 };
 
+const forgetSources = (client: number): void => {
+  for (const [fence, held] of fenceSources)
+    if (held.client === client) fenceSources.delete(fence);
+};
+
 const fallbackQueue: (() => void)[] = [];
 let fallbackPending: (() => void) | null = null;
 
@@ -347,6 +352,7 @@ export function useReasoningHighlight(
     let cancelFallback: (() => void) | undefined;
     listeners.set(id, (reply) => {
       if (reply.failed) {
+        forgetSources(id);
         if (revision.current !== version) return;
         cancelFallback = runFallback();
         return;
@@ -369,8 +375,7 @@ export function useReasoningHighlight(
     () => () => {
       revision.current += 1;
       if (client.current !== null) {
-        for (const [fence, held] of fenceSources)
-          if (held.client === client.current) fenceSources.delete(fence);
+        forgetSources(client.current);
         listeners.delete(client.current);
         worker?.postMessage({ cancel: client.current });
       }

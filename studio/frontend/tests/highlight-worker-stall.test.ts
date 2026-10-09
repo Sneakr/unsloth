@@ -363,3 +363,20 @@ test("every group of a fence edits the source the worker already holds, so the f
     head,
   ], "a group whose base went away, and another fence, send their whole source");
 });
+
+test("a group whose request the worker failed sends its whole source next, since the worker dropped it", (t) => {
+  const hooks = hookRunner();
+  const { client } = setup(t, hooks.react);
+  const head = "const a = 1;\n";
+  const grown = `${head}const b = 2;\n`;
+  let source = head;
+  const group = hooks.mount(() => client.useReasoningHighlight("m:0:9", source, "javascript", [0], null, true));
+  group.render();
+  const [instance] = FakeWorker.made;
+  instance.send({ ready: true });
+  instance.send({ client: 1, revision: 1, lines: [], failed: true });
+  source = grown;
+  group.render();
+  const sources = instance.posted.flatMap((message) => ("source" in message ? [message.source] : []));
+  assert.deepEqual(sources, [head, grown], "an edit of a source the worker no longer holds is built on an empty one");
+});

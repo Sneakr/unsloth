@@ -779,8 +779,6 @@ export function useIntentAwareAutoScroll(): {
   );
 
   // Thread lifecycle moments that always pin, regardless of detach state.
-  // "auto" respects CSS smooth scroll for runStart (new turns glide in);
-  // "instant" snaps for load/switch where animation is wasted.
   const pinToBottom = useCallback((behavior: ScrollBehavior) => {
     userDetachedRef.current = false;
     scrollImplRef.current(behavior);

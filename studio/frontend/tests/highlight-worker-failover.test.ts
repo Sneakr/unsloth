@@ -65,7 +65,7 @@ test("a fence too long for the main thread stays plain without the worker, and t
   assert.match(WORKER, /const result = request\.full \|\| request\.exact\s*\? highlighter\.highlightExact\(options, publish\)\s*: highlighter\.highlight\(options, publish\);/, "a whole-fence reply is exact, since the main thread seeds it as a permanent cache entry, and so is a thinking code group no later request will refresh");
   assert.match(HOOK, /useEffect\(\(\) => \{\s*if \(lineKey === ""\) return;/);
   assert.ok(HOOK.includes("if (!instance) return runFallback();"));
-  assert.match(HOOK, /if \(reply\.failed\) \{\s*if \(revision\.current !== version\) return;\s*cancelFallback = runFallback\(\);\s*return;\s*\}/);
+  assert.match(HOOK, /if \(reply\.failed\) \{\s*forgetSources\(id\);\s*if \(revision\.current !== version\) return;\s*cancelFallback = runFallback\(\);\s*return;\s*\}/);
   assert.match(HOOK, /\(\) => \(\) => \{\s*revision\.current \+= 1;/, "an unmounted group never queues a fallback");
   assert.ok(TRANSCRIPT.includes("highlightFenceSource(source, code.language, late)"), "the fallback tokenizes exactly the string the worker tokenizes");
   assert.match(WORKER, /if \(request\.full && result !== null\) forget\(\);/, "a finished whole-fence request leaves nothing behind in the worker");

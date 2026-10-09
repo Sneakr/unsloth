@@ -10,7 +10,7 @@ export function useSliderDraft(
   onDraft?: (value: number | null) => void,
 ) {
   const [draft, setDraft] = useState<number | null>(null);
-  const dragging = useRef(false);
+  const pointers = useRef(new Set<number>());
   const dragged = useRef<number | null>(null);
   const show = (next: number | null) => {
     setDraft(next);
@@ -18,31 +18,34 @@ export function useSliderDraft(
   };
   const end = () => {
     const next = dragged.current;
-    dragging.current = false;
+    pointers.current.clear();
     dragged.current = null;
     show(null);
     if (next !== null && next !== value) onCommit(next);
   };
   const endOnUnmount = useEffectEvent(() => {
-    if (dragging.current) end();
+    if (pointers.current.size > 0) end();
   });
   useEffect(() => () => endOnUnmount(), []);
   return {
     draft,
     sliderProps: {
       value: [draft ?? value],
-      onPointerDown: () => {
-        dragging.current = true;
+      onPointerDown: ({ pointerId }: { pointerId: number }) => {
+        pointers.current.add(pointerId);
       },
       onValueChange: ([next]: number[]) => {
-        if (!dragging.current) return;
+        if (pointers.current.size === 0) return;
         dragged.current = next;
         flushSync(() => show(next));
       },
       onValueCommit: ([next]: number[]) => {
-        if (!dragging.current) onCommit(next);
+        if (pointers.current.size === 0) onCommit(next);
       },
-      onLostPointerCapture: end,
+      onLostPointerCapture: ({ pointerId }: { pointerId: number }) => {
+        pointers.current.delete(pointerId);
+        if (pointers.current.size === 0) end();
+      },
     },
   };
 }

@@ -141,6 +141,18 @@ type GridFragment = Pick<ReasoningFragment, "key" | "text" | "code" | "document"
 export const groupKeyOf = (fragment: GridFragment): string =>
   fragment.code ? `${fragment.document}:${fragment.start}` : fragment.key;
 
+export const rowAtSamePlace = (
+  fragments: readonly GridFragment[],
+  row: GridFragment,
+): number =>
+  fragments.findIndex(
+    (fragment) =>
+      fragment.document === row.document
+      && fragment.start === row.start
+      && fragment.code?.lines[0]?.line === row.code?.lines[0]?.line
+      && fragment.code?.lines[0]?.column === row.code?.lines[0]?.column,
+  );
+
 const startsLine = (fragment: GridFragment): boolean =>
   (fragment.code?.lines[0]?.column ?? 0) === 0;
 

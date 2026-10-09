@@ -58,6 +58,7 @@ import {
   type Island,
   mountPlan,
   NO_ISLANDS,
+  rowAtSamePlace,
   WIDEN_CHARACTERS_PER_FRAME,
   WIDEN_FRAGMENTS_PER_FRAME,
   widenBudget,
@@ -647,6 +648,9 @@ export function ReasoningTranscript({
   const islandsRef = useRef<readonly Island[]>(NO_ISLANDS);
   const mountedIslands = useRef<readonly Island[]>(NO_ISLANDS);
   const recapture = useRef<(fresh?: boolean) => void>(() => {});
+  const carry = useRef<(previous: readonly ReasoningFragment[]) => boolean>(
+    () => false,
+  );
   const demandNow = useRef<() => void>(() => {});
   const requestedAt = useRef(0);
   const reserves = useRef(new Map<string, Reserve>());
@@ -661,6 +665,7 @@ export function ReasoningTranscript({
     mountedAt.current = performance.now();
   }, []);
   useLayoutEffect(() => {
+    const previous = fragmentsRef.current;
     fragmentsRef.current = fragments;
     streamingRef.current = streaming;
     estimatesRef.current = estimates;
@@ -675,13 +680,14 @@ export function ReasoningTranscript({
     const grew = committedRef.current !== limit;
     committedRef.current = limit;
     if (limit > limitRef.current) limitRef.current = limit;
+    const carried = restarted && carry.current(previous);
     if (grew || mountedIslands.current !== islands) {
       mountedIslands.current = islands;
-      recapture.current();
+      if (!carried) recapture.current();
     }
     if (grew && withoutIdleCallback)
       widenCommitMs = Math.max(widenCommitMs, performance.now() - commitStartedAt);
-    if (restarted) demandNow.current();
+    if (restarted && !carried) demandNow.current();
   });
   useEffect(() => {
     const print = () => {
@@ -904,6 +910,32 @@ export function ReasoningTranscript({
       if (!fresh && reading && hold(reading)) return;
       reading = visibleAnchor();
     };
+    carry.current = (previous) => {
+      const anchor = reading;
+      const from = anchor && previous.find((fragment) => fragment.key === anchor.key);
+      if (!from || !laidOut()) return false;
+      const all = fragmentsRef.current;
+      const at = rowAtSamePlace(all, from);
+      if (at < 0) return false;
+      anchor.key = all[at].key;
+      const mounted = committedRef.current;
+      if (isCovered(mounted, all.length) || at < mounted) return false;
+      const below = 2 * scroll.getBoundingClientRect().height;
+      const next = addIsland(
+        islandsRef.current,
+        {
+          start: chunkStartAt(gridRef.current, at),
+          end: chunkEndAt(
+            gridRef.current,
+            Math.min(all.length, rowAt(at, all.length, below) + 1),
+          ),
+        },
+        mounted,
+      );
+      islandsRef.current = next;
+      setIslands(next);
+      return true;
+    };
     const schedule = () => {
       if (frame === 0) frame = requestAnimationFrame(capture);
     };
@@ -914,9 +946,10 @@ export function ReasoningTranscript({
         if (!laidOut()) return;
         reading ??= visibleAnchor();
         if (reading || hasPendingProgressiveMounts()) return;
-        const top = scroll.getBoundingClientRect().top;
-        const bottom = element.getBoundingClientRect().bottom;
-        if (bottom <= top) edge = bottom - top;
+        const bounds = scroll.getBoundingClientRect();
+        const box = element.getBoundingClientRect();
+        if (box.top < bounds.top && box.bottom <= bounds.bottom)
+          edge = box.bottom - bounds.top;
       },
       after: () => {
         const was = edge;

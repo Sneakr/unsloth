@@ -5205,17 +5205,11 @@ html.force-reduced-motion .sidebar-section-drop-line {
 }
 
 /* Chromium ignores ::-webkit-scrollbar while scrollbar-width/color are set, and its standard
-   Windows scrollbar draws arrows. :hover too, or the reveal rules flip it back; the width
-   stays overridable so !important and inline hides still win. */
+   Windows scrollbar draws arrows. The width stays overridable so !important and inline
+   hides still win. */
 @supports selector(::-webkit-scrollbar) {
 	:root.client-windows * {
 		scrollbar-width: auto;
-		scrollbar-color: auto !important;
-	}
-
-	:root.client-windows .sidebar-scroll-fade:hover,
-	:root.client-windows .run-settings-scroll:hover,
-	:root.client-windows .hover-scrollbar:hover {
 		scrollbar-color: auto !important;
 	}
 
