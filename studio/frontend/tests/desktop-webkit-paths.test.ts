@@ -15,7 +15,7 @@ test("a fence body becomes skippable only once it carries its measured height", 
   );
   assert.match(defer, /const NO_WINDOW = \{ window: null, pins: null, measured: false \} as const;\s*const EMPTY_WINDOW = \{ window: EMPTY_LINE_WINDOW, pins: null, measured: false \} as const;/);
   const measure = defer.slice(defer.indexOf("measure.current = () => {"), defer.indexOf("setState({ measured: true, window: next, pins });"));
-  assert.ok(measure.indexOf("body.style.setProperty(FENCE_HEIGHT_PROPERTY, declared);") >= 0, "the measure that first marks a fence measured writes its height before it does");
+  assert.ok(measure.indexOf("region.style.setProperty(FENCE_HEIGHT_PROPERTY, declared);") >= 0, "the measure that first marks a fence measured writes its height before it does");
   const autoscroll = readSrc("components/assistant-ui/use-intent-aware-autoscroll.tsx");
   assert.match(autoscroll, /const onMutation = \(\): void => \{\s*layoutChanged = true;\s*if \(!parkIfHeld\(\)\) \{\s*extendFollow\(\);\s*\}\s*requestTick\(\);\s*\};/, "a mutation never forces layout; following stays the frame loop's job");
   assert.match(autoscroll, /const adjustForContentInsertedAbove = useCallback\(\(deltaPx: number\) => \{\s*adjustImplRef\.current\(deltaPx\);\s*return userDetachedRef\.current;\s*\}, \[\]\);/, "the hold learns whether its correction was written, even when the engine rounded it to nothing");
@@ -34,7 +34,7 @@ test("a desktop zoom shows skipped content until WebKit has measured it at the n
   assert.match(store, /const holdsContainmentAcrossZoom = !\(\s*typeof navigator !== "undefined" && navigator\.userAgent\.includes\("Windows"\)\s*\);/, "WebView2 rescales remembered sizes itself");
   assert.match(readSrc("features/settings/lib/interface-scale-runtime.ts"), /const ZOOMING_RELEASE_MS = 300;/);
   const css = readSrc("index.css");
-  assert.match(css, /html\[data-interface-zooming\] \.aui-thread-root \[data-slot="reasoning-transcript"\] > \[data-reasoning-chunk\],\s*html\[data-interface-zooming\] \.aui-thread-root \[data-streamdown="code-block-body"\]\[data-unsloth-fence-windowed\],\s*html\[data-interface-zooming\] \.aui-thread-root \.aui-math-block,\s*html\[data-interface-zooming\] \.aui-thread-root \.aui-math-display \{\s*content-visibility: visible !important;\s*\}/, "WebKit keeps contain-intrinsic-size: auto sizes in the old zoom's units, maths blocks included");
+  assert.match(css, /html\[data-interface-zooming\] \.aui-thread-root \[data-slot="reasoning-transcript"\] > \[data-reasoning-chunk\],\s*html\[data-interface-zooming\] \.aui-thread-root \[data-unsloth-fence-windowed\],\s*html\[data-interface-zooming\] \.aui-thread-root \.aui-math-block,\s*html\[data-interface-zooming\] \.aui-thread-root \.aui-math-display \{\s*content-visibility: visible !important;\s*\}/, "WebKit keeps contain-intrinsic-size: auto sizes in the old zoom's units, maths blocks included");
   assert.match(store, /interfaceScaleApplicationQueue = Promise\.resolve\(\);\s*releaseContainmentAfterZoom\(\);\s*resolve\(\);/, "a setZoom that never settles must not leave every skipped block rendered");
 });
 

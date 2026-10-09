@@ -9,7 +9,7 @@ type Derived = {
   readonly texts: readonly string[];
 };
 
-const PART_SEPARATOR = "\u0000";
+export const PART_SEPARATOR = "\u0000";
 
 const derived = new WeakMap<object, Derived>();
 

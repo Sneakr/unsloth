@@ -9,17 +9,13 @@
 // already rendered it, and skips full documents the in-place collapse handles.
 
 import { ArtifactCard, useChatRuntimeStore } from "@/features/chat";
-import { derivedForParts } from "./message-derived";
+import { derivedForParts, PART_SEPARATOR } from "./message-derived";
 import {
   extractHtmlFences,
   isRenderableRenderHtmlToolPart,
 } from "@/features/chat/artifacts/html-fences";
 import { useAuiState } from "@assistant-ui/react";
 import { type FC, useMemo } from "react";
-
-// A char that cannot occur in chat text, used to keep text parts separate so a
-// fence is never stitched across a non-text part (tool call, source, reasoning).
-const PART_SEPARATOR = "\u0000";
 
 export const MessageHtmlArtifacts: FC = () => {
   // Skip while streaming; "!== running" also covers loaded historical messages.

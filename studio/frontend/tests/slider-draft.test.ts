@@ -50,7 +50,7 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
       event.handler = handler;
       return event.call;
     },
-    useEffect: (effect: () => (() => void) | void) => {
+    useLayoutEffect: (effect: () => (() => void) | void) => {
       const at = cursor++;
       if (at in slots) return;
       slots[at] = true;

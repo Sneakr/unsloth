@@ -1147,7 +1147,7 @@ const UNMEASURED: LineWindowState = { measured: false };
 type FenceMetrics = {
   lineHeight: number;
   contentInset: number;
-  scrollbar: number;
+  insets: number;
 };
 
 type FenceGeometry = FenceMetrics & {
@@ -1167,14 +1167,14 @@ const intrinsicSizeSupported =
   && typeof CSS.supports === "function"
   && CSS.supports("contain-intrinsic-size", "0 1000px");
 
-const measureIntrinsicScale = (surface: HTMLElement): number => {
+const measureIntrinsicScale = (beside: HTMLElement): number => {
   if (!intrinsicSizeSupported) return 1;
   if (intrinsicScale > 0) return intrinsicScale;
   const probe = document.createElement("div");
   probe.setAttribute("aria-hidden", "true");
   probe.style.cssText =
     "position:absolute;visibility:hidden;pointer-events:none;top:0;left:0;width:0;contain:size;contain-intrinsic-size:0 1000px";
-  surface.before(probe);
+  beside.before(probe);
   const height = probe.getBoundingClientRect().height;
   probe.remove();
   if (!(height > 0)) return 1;
@@ -1182,8 +1182,8 @@ const measureIntrinsicScale = (surface: HTMLElement): number => {
   return intrinsicScale;
 };
 
-const measureLinePitch = (surface: HTMLElement): number => {
-  const parent = surface.parentElement;
+const measureLinePitch = (beside: HTMLElement): number => {
+  const parent = beside.parentElement;
   if (!parent) return 0;
   const context = getComputedStyle(parent);
   const key = [
@@ -1191,7 +1191,7 @@ const measureLinePitch = (surface: HTMLElement): number => {
     context.lineHeight,
     getComputedStyle(document.documentElement).getPropertyValue("--custom-code-font-size"),
     window.devicePixelRatio,
-    measureIntrinsicScale(surface),
+    measureIntrinsicScale(beside),
   ].join("|");
   const known = linePitches.get(key);
   if (known !== undefined) return known;
@@ -1208,7 +1208,7 @@ const measureLinePitch = (surface: HTMLElement): number => {
   }
   code.append(...lines);
   probe.append(code);
-  surface.before(probe);
+  beside.before(probe);
   const pitch =
     (lines[PITCH_PROBE_LINES - 1].getBoundingClientRect().top - lines[0].getBoundingClientRect().top)
     / (PITCH_PROBE_LINES - 1);
@@ -1220,14 +1220,12 @@ const measureLinePitch = (surface: HTMLElement): number => {
 const readFenceMetrics = (
   node: HTMLElement,
   surface: HTMLElement,
+  region: HTMLElement,
   lineCount: number,
   previous: FenceMetrics | null,
 ): FenceMetrics => {
   const style = getComputedStyle(surface);
-  const borders =
-    (Number.parseFloat(style.borderTopWidth) || 0)
-    + (Number.parseFloat(style.borderBottomWidth) || 0);
-  const pitch = measureLinePitch(surface);
+  const pitch = measureLinePitch(region);
   const declared = Number.parseFloat(style.lineHeight);
   const lineHeight =
     pitch > 0
@@ -1243,25 +1241,31 @@ const readFenceMetrics = (
     contentInset:
       (Number.parseFloat(style.borderTopWidth) || 0)
       + (Number.parseFloat(style.paddingTop) || 0),
-    scrollbar: Math.max(0, surface.offsetHeight - surface.clientHeight - borders),
+    insets: Math.max(0, surface.getBoundingClientRect().height - lineCount * lineHeight),
   };
 };
 
 const readFenceGeometry = (
   node: HTMLElement,
   surface: HTMLElement,
+  region: HTMLElement,
   outer: HTMLElement,
   lineCount: number,
 ): FenceGeometry => {
   const scroller = scrollerOf(outer);
-  return { scroller, ...readFenceMetrics(node, surface, lineCount, null) };
+  return { scroller, ...readFenceMetrics(node, surface, region, lineCount, null) };
 };
+
+const skippedByContainment = (element: HTMLElement): boolean =>
+  typeof element.checkVisibility === "function"
+  && !element.checkVisibility({ contentVisibilityAuto: true });
 
 const FAR_VIEWPORTS = OVERSCAN_VIEWPORTS + HYSTERESIS_VIEWPORTS + 1;
 
 function useLineWindow(
   code: RefObject<HTMLElement | null>,
   surface: RefObject<HTMLElement | null>,
+  wrapper: RefObject<HTMLElement | null>,
   frame: RefObject<HTMLElement | null>,
   lineCount: number,
   enabled: boolean,
@@ -1281,7 +1285,8 @@ function useLineWindow(
     const node = code.current;
     const outer = frame.current;
     const body = surface.current;
-    if (!node || !outer || !body) return;
+    const region = wrapper.current;
+    if (!node || !outer || !body || !region) return;
     if (lines.current <= WINDOW_CAP_LINES && current.current === null) return;
     if (printing || findBarOpen()) {
       if (current.current === null && pinned.current === null) return;
@@ -1295,25 +1300,29 @@ function useLineWindow(
       known === null
       || (known.scroller !== null && !isScrollable(known.scroller))
     ) {
-      known = readFenceGeometry(node, body, outer, lines.current);
-    } else if (metricsStale.current) {
-      known = { scroller: known.scroller, ...readFenceMetrics(node, body, lines.current, known) };
+      known = readFenceGeometry(node, body, region, outer, lines.current);
+      metricsStale.current = false;
+    } else if (metricsStale.current && !skippedByContainment(body)) {
+      known = {
+        scroller: known.scroller,
+        ...readFenceMetrics(node, body, region, lines.current, known),
+      };
+      metricsStale.current = false;
     }
-    metricsStale.current = false;
     geometry.current = known;
     const height =
       Math.round(
-        (lines.current * known.lineHeight + known.scrollbar) * measureIntrinsicScale(body) * 1000,
+        (lines.current * known.lineHeight + known.insets) * measureIntrinsicScale(region) * 1000,
       ) / 1000;
     const declared = `${height}px`;
-    if (body.style.getPropertyValue(FENCE_HEIGHT_PROPERTY) !== declared) {
-      body.style.setProperty(FENCE_HEIGHT_PROPERTY, declared);
+    if (region.style.getPropertyValue(FENCE_HEIGHT_PROPERTY) !== declared) {
+      region.style.setProperty(FENCE_HEIGHT_PROPERTY, declared);
       forgetScrollable();
     }
     const bounds = known.scroller === null ? null : rectDuringFrame(known.scroller);
     const viewportTop = bounds ? bounds.top : 0;
     const viewportHeight = bounds ? bounds.height : window.innerHeight;
-    const box = rectDuringFrame(body);
+    const box = rectDuringFrame(region);
     const reach = viewportHeight * FAR_VIEWPORTS;
     if (
       current.current !== null
@@ -1366,7 +1375,7 @@ function useLineWindow(
       windowedFences.delete(run);
       unwatchWindows();
     };
-  }, [enabled, hasBody, code, surface, frame]);
+  }, [enabled, hasBody, code, surface, wrapper, frame]);
 
   useLayoutEffect(() => {
     if (!enabled || !overCap || state.measured) return;
@@ -1406,11 +1415,13 @@ export const FenceBody = memo(function FenceBody({
 }) {
   const code = useRef<HTMLElement | null>(null);
   const surface = useRef<HTMLDivElement | null>(null);
+  const wrapper = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const tokens = result?.tokens ?? null;
   const { window: lineWindow, pins, measured } = useLineWindow(
     code,
     surface,
+    wrapper,
     frame,
     tokens?.length ?? 0,
     windowing,
@@ -1453,26 +1464,30 @@ export const FenceBody = memo(function FenceBody({
         <span className="ml-1 font-mono lowercase">{language}</span>
       </div>
       <div
-        className={joinClasses(
-          languageClass,
-          "overflow-x-auto rounded-md border border-border bg-background p-4 text-sm",
-        )}
-        data-language={language ?? undefined}
-        data-streamdown="code-block-body"
         data-unsloth-fence-windowed={lineWindow === null || !measured ? undefined : "true"}
-        ref={surface}
+        ref={wrapper}
       >
-        <pre className={joinClasses(languageClass, PRE_CLASS)} style={rootStyle}>
-          <code className={CODE_CLASS} ref={code}>
-            {tokens.map((line, index) => (
-              <FenceLine
-                key={index}
-                line={line}
-                windowed={lineRendered(lineWindow, pins, index)}
-              />
-            ))}
-          </code>
-        </pre>
+        <div
+          className={joinClasses(
+            languageClass,
+            "overflow-x-auto rounded-md border border-border bg-background p-4 text-sm",
+          )}
+          data-language={language ?? undefined}
+          data-streamdown="code-block-body"
+          ref={surface}
+        >
+          <pre className={joinClasses(languageClass, PRE_CLASS)} style={rootStyle}>
+            <code className={CODE_CLASS} ref={code}>
+              {tokens.map((line, index) => (
+                <FenceLine
+                  key={index}
+                  line={line}
+                  windowed={lineRendered(lineWindow, pins, index)}
+                />
+              ))}
+            </code>
+          </pre>
+        </div>
       </div>
     </div>
   );

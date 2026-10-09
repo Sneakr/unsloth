@@ -29,10 +29,15 @@ self.onmessage ??= ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
     return;
   }
   const base = typeof data.source === "string" ? undefined : data.source.base;
-  let source = reasoningHighlightSource(
-    sources.get(base ?? data.client) ?? "",
-    data.source,
-  );
+  const held = sources.get(base ?? data.client);
+  if (typeof data.source !== "string" && held === undefined) {
+    pending.delete(data.client);
+    revisions.delete(data.client);
+    sources.delete(data.client);
+    self.postMessage(reasoningHighlightFailure(data.client, data.revision));
+    return;
+  }
+  let source = reasoningHighlightSource(held ?? "", data.source);
   for (const known of sources.values()) {
     if (known === source) {
       source = known;

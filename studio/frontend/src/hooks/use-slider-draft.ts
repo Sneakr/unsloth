@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 export function useSliderDraft(
@@ -26,7 +26,7 @@ export function useSliderDraft(
   const endOnUnmount = useEffectEvent(() => {
     if (pointers.current.size > 0) end();
   });
-  useEffect(() => () => endOnUnmount(), []);
+  useLayoutEffect(() => () => endOnUnmount(), []);
   return {
     draft,
     sliderProps: {

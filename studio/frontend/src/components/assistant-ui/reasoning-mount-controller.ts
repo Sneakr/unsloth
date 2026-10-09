@@ -82,12 +82,6 @@ export const initialRows = (
   return Math.max(1, rows);
 };
 
-export const widenRows = (
-  mounted: number,
-  total: number,
-  step: number,
-): number => (mounted >= total ? total : Math.min(total, mounted + Math.max(1, step)));
-
 export const widenBudget = (
   sizes: readonly number[],
   mounted: number,
@@ -141,17 +135,82 @@ type GridFragment = Pick<ReasoningFragment, "key" | "text" | "code" | "document"
 export const groupKeyOf = (fragment: GridFragment): string =>
   fragment.code ? `${fragment.document}:${fragment.start}` : fragment.key;
 
-export const rowAtSamePlace = (
-  fragments: readonly GridFragment[],
-  row: GridFragment,
-): number =>
-  fragments.findIndex(
+type PlacedFragment = Pick<ReasoningFragment, "text" | "code" | "document" | "start" | "end">;
+
+const rowAtSamePlace = (
+  fragments: readonly PlacedFragment[],
+  row: PlacedFragment,
+): number => {
+  const line = row.code?.lines[0]?.line ?? 0;
+  const column = row.code?.lines[0]?.column ?? 0;
+  const same = fragments.findIndex(
     (fragment) =>
       fragment.document === row.document
       && fragment.start === row.start
-      && fragment.code?.lines[0]?.line === row.code?.lines[0]?.line
-      && fragment.code?.lines[0]?.column === row.code?.lines[0]?.column,
+      && (fragment.code?.lines[0]?.line ?? 0) === line
+      && (fragment.code?.lines[0]?.column ?? 0) === column,
   );
+  if (same >= 0) return same;
+  const at = row.code
+    ? row.start
+    : row.start + row.text.length - row.text.trimStart().length;
+  return fragments.findIndex(
+    (fragment) =>
+      fragment.document === row.document
+      && fragment.start <= at
+      && at < fragment.end,
+  );
+};
+
+const occurrencesIn = (row: PlacedFragment, needle: string): number => {
+  if (!needle) return 0;
+  let found = 0;
+  for (const { text } of row.code?.lines ?? []) {
+    for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1))
+      found += 1;
+  }
+  return found;
+};
+
+const fenceRows = (
+  fragments: readonly PlacedFragment[],
+  fence: PlacedFragment,
+): number[] =>
+  fragments.flatMap((fragment, index) =>
+    fragment.code
+    && fragment.document === fence.document
+    && fragment.start === fence.start
+      ? [index]
+      : [],
+  );
+
+export const anchorAtSamePlace = (
+  previous: readonly PlacedFragment[],
+  fragments: readonly PlacedFragment[],
+  row: PlacedFragment,
+  text: string,
+  occurrence: number,
+): { index: number; occurrence: number } | null => {
+  const index = rowAtSamePlace(fragments, row);
+  if (index < 0) return null;
+  if (Boolean(row.code) === Boolean(fragments[index].code))
+    return { index, occurrence };
+  if (row.code) {
+    let before = 0;
+    for (const at of fenceRows(previous, row)) {
+      if (previous[at] === row) break;
+      before += occurrencesIn(previous[at], text);
+    }
+    return { index, occurrence: occurrence + before };
+  }
+  let left = occurrence;
+  for (const at of fenceRows(fragments, fragments[index])) {
+    const here = occurrencesIn(fragments[at], text);
+    if (left < here) return { index: at, occurrence: left };
+    left -= here;
+  }
+  return { index, occurrence };
+};
 
 const startsLine = (fragment: GridFragment): boolean =>
   (fragment.code?.lines[0]?.column ?? 0) === 0;

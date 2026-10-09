@@ -79,7 +79,7 @@ test("the scroller walk is memoized for one synchronous stack and nowhere longer
   for (const token of ['"auto"', '"scroll"', '"overlay"', "scrollHeight > el.clientHeight"]) {
     assert.ok(predicate.includes(token), token);
   }
-  assert.match(defer, /body\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, declared\);\s*forgetScrollable\(\);/);
+  assert.match(defer, /region\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, declared\);\s*forgetScrollable\(\);/);
   assert.match(defer, /const remeasureWindows = \(\): void => \{\s*windowFrame = 0;\s*forgetScrollable\(\);/);
   assert.equal(defer.includes("requestAnimationFrame(forgetScrollable"), false);
   assert.equal(defer.includes("frameScrollable"), false);

@@ -92,6 +92,17 @@ test("a code group's first request edits the source another group of its fence a
   assert.ok(range(40, 20).every((line) => coloured(worker.latest(2).get(line))));
 });
 
+test("an edit of a source the worker no longer holds fails instead of colouring a guess", async (t) => {
+  const worker = startWorker(t);
+  const head = code(0, 40);
+  worker.send({ client: 1, revision: 1, source: head, language: "javascript", lines: range(0, 40), exact: true });
+  worker.send({ cancel: 1 });
+  worker.send({ client: 2, revision: 3, source: { base: 1, from: head.length, text: `\n${code(40, 1)}` }, language: "javascript", lines: [40], exact: true });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const replies = worker.replies.filter((reply) => reply.client === 2);
+  assert.deepEqual(replies, [{ client: 2, revision: 3, lines: [], failed: true }], "the sibling's source was gone, so its edit was applied to an empty string");
+});
+
 test("only the growing tail of a fence may take the throttled colours, and a finished fence shares one source", () => {
   assert.match(TRANSCRIPT, /const growing = streaming && code\.incomplete;\s*const frozen = growing && !last\.last;/);
   assert.match(TRANSCRIPT, /if \(frozen \? stableSource\?\.key !== last\.key : stableSource !== null\)\s*setStableSource\(frozen \? \{ key: last\.key, source: code\.source \} : null\);/, "a group keeps the prefix it finished with only while the fence grows, then drops it");

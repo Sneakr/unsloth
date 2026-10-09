@@ -61,11 +61,11 @@ test("one rule, gated on the html attribute, inside the utilities layer", () => 
   const rule = rules[0].slice(0, rules[0].indexOf("}"));
   assert.ok(rule.includes(".aui-thread-root"), "scoped to the chat thread");
   assert.ok(rule.includes('[data-streamdown="code-block"]:not([data-incomplete])'), "settled fences only");
-  assert.ok(rule.includes('> [data-streamdown="code-block-body"][data-unsloth-fence-windowed]'), "the windowed body, not the wrapper");
+  assert.ok(rule.includes(':not([data-incomplete]) > [data-unsloth-fence-windowed] {'), "the box around the windowed body: a skipped scroller drops its scrollbar in Chromium and its padding in Firefox, so the body itself would come back taller than it was skipped");
   assert.ok(rule.includes("content-visibility: auto;"), "the declaration under test");
   assert.ok(rule.includes(`contain-intrinsic-size: auto var(${FENCE_HEIGHT_PROPERTY})`), "sized by the component's measurement");
   assert.equal(rule.includes(":has("), false, "never :has()");
-  assert.equal(rule.includes("!important"), false, "the body is not the element the visible override targets");
+  assert.equal(rule.includes("!important"), false, "the windowed box is not the element the visible override targets");
 });
 
 test("the wrapper keeps the visible override and the body keeps the DOM contract", () => {
@@ -74,36 +74,37 @@ test("the wrapper keeps the visible override and the body keeps the DOM contract
     "the flicker rule on the wrapper stays",
   );
   const body = DEFER.slice(DEFER.indexOf("export const FenceBody = memo("));
-  assert.ok(/data-streamdown="code-block-body"\s*data-unsloth-fence-windowed=\{lineWindow === null \|\| !measured \? undefined : "true"\}\s*ref=\{surface\}/.test(body), "the body carries the window hook and the measuring ref");
+  assert.ok(/<div\s*data-unsloth-fence-windowed=\{lineWindow === null \|\| !measured \? undefined : "true"\}\s*ref=\{wrapper\}\s*>\s*<div\s*className=\{joinClasses\([\s\S]*?\)\}\s*data-language=\{language \?\? undefined\}\s*data-streamdown="code-block-body"\s*ref=\{surface\}/.test(body), "the window hook sits on a box that does not scroll, around a body that keeps streamdown's markup and the measuring ref");
   assert.ok(!/contentVisibility:\s*"hidden"|display:\s*"none"/.test(body), "no line may be hidden from the engine");
 });
 
 test("the component writes the measured height before paint and only when it changes", () => {
   assert.ok(DEFER.includes('import { FENCE_HEIGHT_PROPERTY } from "./code-block-containment-mode";'));
-  assert.match(DEFER, /const declared = `\$\{height\}px`;\s*if \(body\.style\.getPropertyValue\(FENCE_HEIGHT_PROPERTY\) !== declared\) \{\s*body\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, declared\);/, "compared with the element's own declaration, so a body that remounts is written again");
-  assert.match(DEFER, /scrollbar: Math\.max\(0, surface\.offsetHeight - surface\.clientHeight - borders\)/, "a horizontal scrollbar is part of the box the skipped body must reproduce");
-  assert.match(DEFER, /const height =\s*Math\.round\(\s*\(lines\.current \* known\.lineHeight \+ known\.scrollbar\) \* measureIntrinsicScale\(body\) \* 1000,\s*\) \/ 1000;/, "scaled where WebKit lays out contain-intrinsic-size lengths without the page zoom");
+  assert.match(DEFER, /const declared = `\$\{height\}px`;\s*if \(region\.style\.getPropertyValue\(FENCE_HEIGHT_PROPERTY\) !== declared\) \{\s*region\.style\.setProperty\(FENCE_HEIGHT_PROPERTY, declared\);/, "compared with the element's own declaration, so a box that remounts is written again");
+  assert.match(DEFER, /insets: Math\.max\(0, surface\.getBoundingClientRect\(\)\.height - lineCount \* lineHeight\)/, "the box holds the whole body, so its border, padding and horizontal scrollbar are part of the height a skipped box reproduces");
+  assert.match(DEFER, /const height =\s*Math\.round\(\s*\(lines\.current \* known\.lineHeight \+ known\.insets\) \* measureIntrinsicScale\(region\) \* 1000,\s*\) \/ 1000;/, "scaled where WebKit lays out contain-intrinsic-size lengths without the page zoom");
   assert.match(DEFER, /contain:size;contain-intrinsic-size:0 1000px/);
-  assert.match(DEFER, /CSS\.supports\("contain-intrinsic-size", "0 1000px"\);\s*const measureIntrinsicScale = \(surface: HTMLElement\): number => \{\s*if \(!intrinsicSizeSupported\) return 1;/, "an engine without contain-intrinsic-size probes nothing, since its probe measures 0 and would be inserted again on every measure");
-  assert.match(DEFER, /window\.devicePixelRatio,\s*measureIntrinsicScale\(surface\),\s*\]\.join\("\|"\);/, "a page zoom WebKit hides from devicePixelRatio still re-probes the pitch");
+  assert.match(DEFER, /CSS\.supports\("contain-intrinsic-size", "0 1000px"\);\s*const measureIntrinsicScale = \(beside: HTMLElement\): number => \{\s*if \(!intrinsicSizeSupported\) return 1;/, "an engine without contain-intrinsic-size probes nothing, since its probe measures 0 and would be inserted again on every measure");
+  assert.match(DEFER, /window\.devicePixelRatio,\s*measureIntrinsicScale\(beside\),\s*\]\.join\("\|"\);/, "a page zoom WebKit hides from devicePixelRatio still re-probes the pitch");
   const measure = DEFER.slice(DEFER.indexOf("measure.current = () => {"), DEFER.indexOf("useLayoutEffect(() => {", DEFER.indexOf("measure.current = () => {")));
   assert.ok(measure.indexOf("setProperty(FENCE_HEIGHT_PROPERTY") < measure.indexOf("const reach ="), "written before the far-away early return, so a fence measured once always carries its height");
 });
 
 test("the window measure never reads inside a body that may be skipped", () => {
   const measure = DEFER.slice(DEFER.indexOf("measure.current = () => {"), DEFER.indexOf("useLayoutEffect(() => {", DEFER.indexOf("measure.current = () => {")));
-  assert.ok(!/node\.getBoundingClientRect|code\.current\.getBoundingClientRect/.test(measure), "descendant rects are read by readFenceMetrics on registration and resize only");
-  assert.match(measure, /rectDuringFrame\(body\)/, "the body's own box is what the window is read against");
+  assert.ok(!/(node|body|code\.current)\.getBoundingClientRect|rectDuringFrame\(body\)/.test(measure), "descendant rects are read by readFenceMetrics on registration and resize only");
+  assert.match(measure, /rectDuringFrame\(region\)/, "the box around the body is what the window is read against");
+  assert.match(measure, /\} else if \(metricsStale\.current && !skippedByContainment\(body\)\) \{/, "a resize re-reads a skipped fence's metrics once it is laid out again, instead of forcing its layout");
   assert.match(DEFER, /const FAR_VIEWPORTS = OVERSCAN_VIEWPORTS \+ HYSTERESIS_VIEWPORTS \+ 1;/, "the far band is derived from the window's own margins");
 });
 
-test("the line pitch is measured from layout once per metric set, beside the body", () => {
+test("the line pitch is measured from layout once per metric set, beside the box around the body", () => {
   const metrics = DEFER.slice(DEFER.indexOf("const measureLinePitch = "), DEFER.indexOf("const readFenceGeometry = ("));
-  assert.match(metrics, /const pitch = measureLinePitch\(surface\);/);
+  assert.match(metrics, /const pitch = measureLinePitch\(region\);/);
   assert.match(metrics, /pitch > 0\s*\? pitch/, "the laid-out pitch wins over a computed line-height the engine truncates to 1/64 px per line");
   assert.match(metrics, /const context = getComputedStyle\(parent\);/, "keyed on the wrapper, never on the body that may be skipped");
   assert.equal(/getComputedStyle\((node|code)\b/.test(metrics), false);
-  assert.match(metrics, /surface\.before\(probe\);/, "the probe sits beside the body, outside the skipped subtree");
+  assert.match(metrics, /beside\.before\(probe\);/, "the probe sits beside the box, outside the skipped subtree");
   assert.match(metrics, /line\.className = LINE_CLASS;/, "built like the fence's own lines, inside a pre and a code");
   assert.match(metrics, /\(lines\[PITCH_PROBE_LINES - 1\]\.getBoundingClientRect\(\)\.top - lines\[0\]\.getBoundingClientRect\(\)\.top\)\s*\/ \(PITCH_PROBE_LINES - 1\)/, "the mean advance across the probe's lines, so no padding or border of the probe can leak in and no single line's rounding is multiplied");
   const probeLines = Number(/const PITCH_PROBE_LINES = (\d+);/.exec(DEFER)?.[1] ?? 0);
@@ -113,9 +114,9 @@ test("the line pitch is measured from layout once per metric set, beside the bod
   assert.match(metrics, /probe\.remove\(\);/);
 });
 
-test("a print clears the containment on every code body, through the media query", () => {
-  const block = printBlocks(INDEX_CSS).find((candidate) => candidate.includes('[data-streamdown="code-block-body"]')) ?? "";
-  assert.notEqual(block, "", "a @media print block names the code body");
+test("a print clears the containment on every windowed fence, through the media query", () => {
+  const block = printBlocks(INDEX_CSS).find((candidate) => candidate.includes("[data-unsloth-fence-windowed]")) ?? "";
+  assert.notEqual(block, "", "a @media print block names the windowed box");
   assert.ok(block.includes("content-visibility: visible !important"));
   assert.ok(block.includes("contain-intrinsic-size: none !important"));
 });

@@ -44,6 +44,7 @@ import {
 } from "./use-intent-aware-autoscroll";
 import {
   addIsland,
+  anchorAtSamePlace,
   buildChunkGrid,
   chunkEndAt,
   chunkPieces,
@@ -58,7 +59,6 @@ import {
   type Island,
   mountPlan,
   NO_ISLANDS,
-  rowAtSamePlace,
   WIDEN_CHARACTERS_PER_FRAME,
   WIDEN_FRAGMENTS_PER_FRAME,
   widenBudget,
@@ -910,14 +910,30 @@ export function ReasoningTranscript({
       if (!fresh && reading && hold(reading)) return;
       reading = visibleAnchor();
     };
+    let rootBefore: number | null = null;
+    let carrying = false;
+    const keepOnScreen = () => {
+      if (reading && rootBefore !== null)
+        reading.offset += rootBefore - element.getBoundingClientRect().top;
+      rootBefore = null;
+    };
     carry.current = (previous) => {
+      keepOnScreen();
       const anchor = reading;
       const from = anchor && previous.find((fragment) => fragment.key === anchor.key);
       if (!from || !laidOut()) return false;
       const all = fragmentsRef.current;
-      const at = rowAtSamePlace(all, from);
-      if (at < 0) return false;
+      const place = anchorAtSamePlace(
+        previous,
+        all,
+        from,
+        anchor.text,
+        anchor.occurrence ?? 0,
+      );
+      if (!place) return false;
+      const at = place.index;
       anchor.key = all[at].key;
+      anchor.occurrence = place.occurrence;
       const mounted = committedRef.current;
       if (isCovered(mounted, all.length) || at < mounted) return false;
       const below = 2 * scroll.getBoundingClientRect().height;
@@ -934,6 +950,7 @@ export function ReasoningTranscript({
       );
       islandsRef.current = next;
       setIslands(next);
+      carrying = true;
       return true;
     };
     const schedule = () => {
@@ -943,15 +960,24 @@ export function ReasoningTranscript({
     commitEdge.current = {
       before: () => {
         edge = null;
+        rootBefore = null;
         if (!laidOut()) return;
         reading ??= visibleAnchor();
-        if (reading || hasPendingProgressiveMounts()) return;
+        if (reading) {
+          rootBefore = element.getBoundingClientRect().top;
+          return;
+        }
+        if (hasPendingProgressiveMounts()) return;
         const bounds = scroll.getBoundingClientRect();
         const box = element.getBoundingClientRect();
         if (box.top < bounds.top && box.bottom <= bounds.bottom)
           edge = box.bottom - bounds.top;
       },
       after: () => {
+        if (carrying) {
+          carrying = false;
+          keepOnScreen();
+        }
         const was = edge;
         edge = null;
         if (was === null || !laidOut()) return;

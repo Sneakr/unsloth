@@ -25,9 +25,8 @@ import {
   CHUNK_MAX_GROUPS,
   initialRows,
   isCovered,
-  rowAtSamePlace,
+  anchorAtSamePlace,
   widenBudget,
-  widenRows,
 } from "../src/components/assistant-ui/reasoning-mount-controller.ts";
 import { ReasoningTranscriptIndex } from "../src/components/assistant-ui/reasoning-transcript-index.ts";
 import {
@@ -83,21 +82,18 @@ test("the first commit covers the budget and always includes the anchor row", ()
   assert.equal(initialRows([], 250, -1), 0, "an empty trace has nothing to mount");
 });
 
-test("widening only grows, by the step, and stops at the end", () => {
-  assert.equal(widenRows(3, 10, 3), 6);
-  assert.equal(widenRows(9, 10, 3), 10);
-  assert.equal(widenRows(10, 10, 3), 10);
-  assert.equal(widenRows(12, 10, 3), 10, "a shrunken trace is clamped, never unmounted below what exists");
-  assert.equal(widenRows(3, 10, 0), 4, "a zero step still makes progress");
+test("widening covers the trace and stops at the end", () => {
   assert.equal(isCovered(10, 10), true);
   assert.equal(isCovered(9, 10), false);
-  let mounted = initialRows(Array(40).fill(100), 2 * 900, -1);
+  const sizes = Array(40).fill(100);
+  let mounted = initialRows(sizes, 2 * 900, -1);
   let steps = 0;
   while (!isCovered(mounted, 40)) {
-    mounted = widenRows(mounted, 40, 3);
+    mounted = widenBudget(sizes, mounted, 300).rows;
     steps += 1;
     assert.ok(steps < 100, "widening converges");
   }
+  assert.equal(mounted, 40);
   assert.ok(steps <= Math.ceil(40 / 3) + 1);
   assert.equal(INITIAL_VIEWPORTS, 1);
 });
@@ -271,11 +267,44 @@ test("a rewrite that re-keys every row still finds each row at its place in the 
   const codeRow = before.find((fragment) => (fragment.code?.lines[0]?.line ?? 0) > 0);
   assert.ok(codeRow, "the fence spans several code rows");
   for (const row of [prose, codeRow]) {
-    const at = rowAtSamePlace(after, row);
-    assert.notEqual(after[at].key, row.key, "a split closing tag rewrote the trace, so every key changed");
-    assert.equal(after[at].text, row.text);
+    const place = anchorAtSamePlace(before, after, row, "const", 2);
+    assert.ok(place);
+    assert.notEqual(after[place.index].key, row.key, "a split closing tag rewrote the trace, so every key changed");
+    assert.equal(after[place.index].text, row.text);
+    assert.equal(place.occurrence, 2);
   }
-  assert.equal(rowAtSamePlace(after, { ...prose, start: prose.start + 1 }), -1);
+  assert.equal(anchorAtSamePlace(before, after, { ...prose, document: 1 }, "First", 0), null);
+});
+
+test("a streamed fence's rows keep the reader's place when the rewrite parses the fence as one prose row", () => {
+  const code = Array.from({ length: 40 }, (_, i) => `const line${i} = ${i};`).join("\n");
+  const trace = `First thought.\n\n\`\`\`javascript\n${code}\n\`\`\`\n\nSecond thought.\n\nThird thought.`;
+  const index = new ReasoningTranscriptIndex();
+  for (let end = 8; end < trace.length; end += 8) index.update([trace.slice(0, end)]);
+  const before = index.update([`${trace} </thi`]);
+  const after = index.update([trace]);
+  const fence = after.find((fragment) => fragment.text.startsWith("```"));
+  assert.ok(fence && !fence.code, "PRECONDITION: the full parse holds the fence as prose");
+  const codeRows = before.filter((fragment) => fragment.code);
+  assert.ok(codeRows.length > 1, "PRECONDITION: the stream held the fence as several code rows");
+  for (const row of codeRows) assert.equal(after[anchorAtSamePlace(before, after, row, "const", 0)!.index], fence);
+  const third = codeRows[2];
+  assert.equal(third.code?.lines[0]?.line, 32, "PRECONDITION: code rows hold 16 lines");
+  assert.deepEqual(
+    anchorAtSamePlace(before, after, third, "const", 3),
+    { index: after.indexOf(fence), occurrence: 35 },
+    "the passage on line 35 is the fourth match in its code row but the 36th in the whole fence, so the reader was moved up to line 3",
+  );
+  assert.deepEqual(
+    anchorAtSamePlace(after, before, fence, "const", 35),
+    { index: before.indexOf(third), occurrence: 3 },
+    "a fence held as one prose row finds the code row that holds the passage",
+  );
+  for (const row of before.filter((fragment) => !fragment.code)) {
+    const place = anchorAtSamePlace(before, after, row, "thought", 0);
+    assert.ok(place, `no place for ${JSON.stringify(row.text)}`);
+    assert.ok(after[place.index].text.includes(row.text.trim().replace(" </thi", "")));
+  }
 });
 
 test("mounted ranges merge the prefix with the islands and clip to the trace", () => {
