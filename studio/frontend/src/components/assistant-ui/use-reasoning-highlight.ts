@@ -181,6 +181,7 @@ function scheduleIdle(): void {
     if (!worker || boot?.instance === worker) return;
     worker.terminate();
     worker = null;
+    if (state === "stalled") state = "untested";
   }, IDLE_TEARDOWN_MS);
 }
 

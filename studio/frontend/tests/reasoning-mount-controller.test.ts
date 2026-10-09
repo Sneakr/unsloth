@@ -163,7 +163,7 @@ test("the controller and flag modules are plain TypeScript", () => {
   }
 });
 
-type GridInput = { key: string; text: string; document: number; start: number; code?: { source: string; incomplete: boolean; language: string | null; lines: [] } };
+type GridInput = { key: string; text: string; document: number; start: number; code?: { source: string; incomplete: boolean; language: string | null; lines: { line: number; column: number; text: string }[] } };
 const prose = (key: string, chars: number, start = 0): GridInput => ({ key, text: "x".repeat(chars), document: 0, start });
 const code = (fence: number, line: number, chars: number): GridInput => ({
   key: `0:0:${fence}:code:${line}:0`,
@@ -186,6 +186,27 @@ test("the grid groups a fence's fragments, closes chunks by characters or count,
   const many = Array.from({ length: 30 }, (_, i) => prose(`g${i}`, 10));
   assert.deepEqual(buildChunkGrid(many, many.map(() => 1), 8_192, 12).chunks.map((c) => c.end - c.first), [12, 12, 6]);
   assert.deepEqual(buildChunkGrid([], []).chunks, []);
+});
+
+test("a long fence splits into chunk-sized groups at line starts, keyed so its growth never re-keys one", () => {
+  const row = (line: number, chars: number, column = 0): GridInput => ({
+    key: `0:0:7:code:${line}:${column}`,
+    text: "y".repeat(chars),
+    document: 0,
+    start: 7,
+    code: { source: "", incomplete: true, language: "js", lines: [{ line, column, text: "" }] },
+  });
+  const fence = Array.from({ length: 12 }, (_, i) => row(i * 16, 1000));
+  const grid = buildChunkGrid(fence, fence.map(() => 1), 8_192, 12);
+  assert.deepEqual(grid.groups.map((g) => [g.key, g.first, g.end, g.code]), [
+    ["0:7", 0, 9, true], [fence[9].key, 9, 12, true],
+  ]);
+  assert.deepEqual(grid.chunks.map((c) => [c.key, c.first, c.end]), [["0:7", 0, 9], [fence[9].key, 9, 12]]);
+  assert.equal(chunkEndAt(grid, 3), 9, "the mount budget can stop inside a long fence");
+  const grown = [...fence, row(192, 1000)];
+  assert.deepEqual(buildChunkGrid(grown, grown.map(() => 1), 8_192, 12).groups.slice(0, 2).map((g) => [g.key, g.first]), grid.groups.map((g) => [g.key, g.first]));
+  const continued = fence.map((fragment, i) => (i === 9 ? row(128, 1000, 4000) : fragment));
+  assert.deepEqual(buildChunkGrid(continued, continued.map(() => 1), 8_192, 12).groups.map((g) => [g.first, g.end]), [[0, 10], [10, 12]], "a row that continues a line stays with the line it continues");
 });
 
 test("a growing last group never moves to another chunk, and appended groups never move a boundary", () => {

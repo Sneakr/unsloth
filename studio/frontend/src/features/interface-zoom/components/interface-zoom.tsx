@@ -242,7 +242,7 @@ export function InterfaceZoom() {
       modifierHeld = false;
       syncWheel();
     };
-    if (mac) {
+    if (mac || isTauri) {
       armWheel();
     } else {
       window.addEventListener("keydown", onModifierChange, true);

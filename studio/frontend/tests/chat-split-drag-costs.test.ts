@@ -7,11 +7,18 @@ import test from "node:test";
 import { readSrc } from "./helpers/kit.ts";
 
 test("the panel library's pointer-events toggle during a split drag stops at each panel's wrapper", () => {
+  const page = readSrc("features/chat/chat-page.tsx");
   assert.match(
-    readSrc("features/chat/chat-page.tsx"),
-    /data-expanded=\{chatDock === "expanded" \? "true" : "false"\}\s*className=\{cn\(\s*"pointer-events-auto flex h-full min-h-0 min-w-0 flex-col overflow-hidden",/,
+    page,
+    /data-expanded=\{chatDock === "expanded" \? "true" : "false"\}\s*className=\{cn\(\s*"flex h-full min-h-0 min-w-0 flex-col overflow-hidden \[html\[data-panel-resizing\]_&\]:pointer-events-auto",/,
     "react-resizable-panels sets pointer-events: none on both panels for the whole drag; inherited, it restyled the entire thread on press and again on release",
   );
+  assert.doesNotMatch(
+    page,
+    /"pointer-events-auto flex h-full min-h-0 min-w-0 flex-col overflow-hidden"/,
+    "outside a drag the thread inherits pointer-events, so the body lock of an open modal menu keeps the dismissing click off the messages below",
+  );
+  assert.match(readSrc("components/ui/panel-drag-overlay.ts"), /document\.documentElement\.setAttribute\(PANEL_RESIZING_ATTRIBUTE, "true"\)/);
   const css = readSrc("index.css");
   assert.match(css, /\.chat-artifact-pop-surface \{\s*pointer-events: none;/);
   assert.match(

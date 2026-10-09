@@ -238,12 +238,19 @@ const CodeFragment = memo(
   function CodeFragment({
     fragment,
     result,
-  }: { fragment: ReasoningFragment; result: ReasoningLineTokens }) {
+    leading,
+  }: {
+    fragment: ReasoningFragment;
+    result: ReasoningLineTokens;
+    leading: boolean;
+  }) {
     const code = fragment.code!;
     return (
       <>
-        {code.lines.map(({ line, column, text }) => {
+        {code.lines.map(({ line, column, text }, at) => {
           const tokens = result.get(line);
+          const separator =
+            column === 0 && line > 0 && !(leading && at === 0) ? "\n" : "";
           // A delayed grammar must never display the previous, shorter source.
           if (
             !tokens ||
@@ -254,7 +261,7 @@ const CodeFragment = memo(
           ) {
             return (
               <InlineFragment key={`${line}:${column}`}>
-                {column === 0 && line > 0 ? "\n" : ""}
+                {separator}
                 {text}
               </InlineFragment>
             );
@@ -274,7 +281,7 @@ const CodeFragment = memo(
           });
           return (
             <InlineFragment key={`${line}:${column}`}>
-              {column === 0 && line > 0 ? "\n" : ""}
+              {separator}
               <FenceLine line={clipped} windowed inline />
             </InlineFragment>
           );
@@ -292,6 +299,7 @@ const CodeFragment = memo(
       a.text === b.text &&
       a.first === b.first &&
       a.last === b.last &&
+      previous.leading === next.leading &&
       a.code?.language === b.code?.language &&
       a.code!.lines.every(
         ({ line }) => previous.result.get(line) === next.result.get(line),
@@ -359,6 +367,19 @@ function CodeGroup({
     () => typeof IntersectionObserver === "undefined",
   );
   const code = fragments[indices[0]].code!;
+  const first = fragments[indices[0]];
+  const last = fragments[indices[indices.length - 1]];
+  const fenceContinues = !last.last;
+  const [stableSource, setStableSource] = useState<{
+    key: string;
+    source: string;
+  } | null>(null);
+  if (fenceContinues && stableSource?.key !== last.key)
+    setStableSource({ key: last.key, source: code.source });
+  const source =
+    fenceContinues && stableSource?.key === last.key
+      ? stableSource.source
+      : code.source;
   useEffect(() => {
     const element = surface.current;
     if (!element || reached || typeof IntersectionObserver === "undefined")
@@ -386,19 +407,17 @@ function CodeGroup({
     return all;
   }, [reached, indices, fragments]);
   const fallback = useCallback<ReasoningFallbackHighlight>(
-    (late) => highlightFenceSource(code.source, code.language, late),
-    [code.source, code.language],
+    (late) => highlightFenceSource(source, code.language, late),
+    [source, code.language],
   );
   const result = useReasoningHighlight(
-    code.source,
+    source,
     code.language,
     lines,
-    code.incomplete || code.source.length > MAIN_THREAD_HIGHLIGHT_CHARS
+    code.incomplete || source.length > MAIN_THREAD_HIGHLIGHT_CHARS
       ? null
       : fallback,
   );
-  const first = fragments[indices[0]];
-  const last = fragments[indices[indices.length - 1]];
   return (
     <div
       ref={surface}
@@ -425,14 +444,18 @@ function CodeGroup({
       )}
       <pre className="!m-0 min-h-[1lh] whitespace-pre-wrap [overflow-wrap:anywhere] font-mono">
         <code>
-          {indices.map((index) => (
+          {indices.map((index, at) => (
             <span
               key={fragments[index].key}
               data-index={index}
               data-reasoning-fragment={fragments[index].key}
               data-reasoning-code-row=""
             >
-              <CodeFragment fragment={fragments[index]} result={result} />
+              <CodeFragment
+                fragment={fragments[index]}
+                result={result}
+                leading={at === 0}
+              />
             </span>
           ))}
         </code>

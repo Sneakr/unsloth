@@ -222,3 +222,20 @@ test("a busy worker that keeps answering is never declared silent", async (t) =>
   await settleChannels(client);
   assert.equal(client.highlightWorkerState(), "ready", "with nothing waiting, silence means nothing");
 });
+
+test("a late worker that idles out is replaced, so the next long fence is coloured again", async (t) => {
+  const { client } = setup(t);
+  const cancel = client.requestFullHighlight("<html></html>", "html", () => {});
+  assert.ok(cancel);
+  const [late] = FakeWorker.made;
+  late.send({ ready: true });
+  t.mock.timers.tick(15_000);
+  await settleChannels(client);
+  assert.equal(client.highlightWorkerState(), "stalled");
+  cancel();
+  t.mock.timers.tick(10_000);
+  assert.equal(late.terminated, true, "with nothing left waiting, the late worker idles out");
+  assert.equal(client.highlightWorkerState(), "untested");
+  assert.ok(client.requestFullHighlight("<html></html>", "html", () => {}), "the next long fence gets a worker again");
+  assert.equal(FakeWorker.made.length, 2);
+});

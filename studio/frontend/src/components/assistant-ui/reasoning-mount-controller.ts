@@ -137,6 +137,9 @@ type GridFragment = Pick<ReasoningFragment, "key" | "text" | "code" | "document"
 export const groupKeyOf = (fragment: GridFragment): string =>
   fragment.code ? `${fragment.document}:${fragment.start}` : fragment.key;
 
+const startsLine = (fragment: GridFragment): boolean =>
+  (fragment.code?.lines[0]?.column ?? 0) === 0;
+
 export const buildChunkGrid = (
   fragments: readonly GridFragment[],
   estimates: readonly number[],
@@ -151,7 +154,11 @@ export const buildChunkGrid = (
     heights[i + 1] = heights[i] + (estimates[i] ?? 0);
     const key = groupKeyOf(fragment);
     const previous = groups[groups.length - 1];
-    if (previous !== undefined && previous.key === key && previous.end === i) {
+    const sameFence =
+      previous !== undefined
+      && previous.end === i
+      && groupKeyOf(fragments[previous.first]) === key;
+    if (sameFence && (previous.chars < maxChars || !startsLine(fragment))) {
       groups[groups.length - 1] = {
         ...previous,
         end: i + 1,
@@ -159,7 +166,7 @@ export const buildChunkGrid = (
       };
     } else {
       groups.push({
-        key,
+        key: sameFence ? fragment.key : key,
         code: Boolean(fragment.code),
         first: i,
         end: i + 1,

@@ -133,8 +133,10 @@ function generalTab(initialToken: string) {
       TRAINING_UI_PREFERENCE_KEYS: [],
     },
     "@/hooks/use-llama-update-pref": {
+      setShowAudioCppUpdateBanner: noop,
       setShowLlamaUpdateBanner: noop,
       setShowWhisperUpdateBanner: noop,
+      useShowAudioCppUpdateBanner: () => false,
       useShowLlamaUpdateBanner: () => false,
       useShowWhisperUpdateBanner: () => false,
     },

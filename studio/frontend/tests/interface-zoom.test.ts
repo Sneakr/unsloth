@@ -211,7 +211,8 @@ test("the popup keeps one on-screen size and does not dismiss a modal", () => {
   );
   assert.match(zoom, /if \(!isTauri \|\| mac\) return;\s*event\.preventDefault\(\);/);
   assert.match(zoom, /window\.addEventListener\("wheel", onWheel, \{ passive: false \}\)/);
-  assert.match(zoom, /const syncWheel = \(\) => \{\s*if \(modifierHeld \|\| pointerInScope\) armWheel\(\);\s*else disarmWheel\(\);\s*\};/, "off macOS the blocking listener is armed while Ctrl/Meta is held or the pointer is over a zoom scope, so a pinch, which arrives as Ctrl+wheel with no keydown, still reaches the scope");
+  assert.match(zoom, /if \(mac \|\| isTauri\) \{\s*armWheel\(\);\s*\} else \{/, "the desktop turns every Ctrl+wheel into an interface zoom, and a touchpad pinch arrives as one with no keydown, so it listens all the time");
+  assert.match(zoom, /const syncWheel = \(\) => \{\s*if \(modifierHeld \|\| pointerInScope\) armWheel\(\);\s*else disarmWheel\(\);\s*\};/, "in the browser the blocking listener is armed while Ctrl/Meta is held or the pointer is over a zoom scope, so a pinch, which arrives as Ctrl+wheel with no keydown, still reaches the scope");
   assert.match(zoom, /pointerInScope = zoomScopeFor\(event\.target\) !== null;/);
   assert.match(zoom, /window\.addEventListener\("pointerover", onPointerOver, true\);/);
   assert.match(zoom, /window\.removeEventListener\("pointerover", onPointerOver, true\);/);

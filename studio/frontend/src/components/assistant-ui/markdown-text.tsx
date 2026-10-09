@@ -1258,9 +1258,9 @@ const StreamdownBlock = memo((props: BlockProps) => (
 StreamdownBlock.displayName = "StreamdownBlock";
 const AUDIO_PLAYER_RE = /<audio-player\s+src="([^"]+)"\s*\/>/;
 
-// Coalesce only token events that arrive before the browser's next paint, as
-// textgen does. There is no time or length throttle. Incremental block parsing
-// bounds the work performed per paint, and completion returns immediately.
+// Coalesce token events into one render per paint, as textgen does, and space
+// renders by their measured cost. There is no length throttle. Incremental block
+// parsing bounds the work performed per paint, and completion returns immediately.
 function useCoalescedStreamingText(
   text: string,
   isStreaming: boolean,
@@ -1269,8 +1269,7 @@ function useCoalescedStreamingText(
   const [displayed, setDisplayed] = useState({ messageId, text });
   const pendingRef = useRef({ messageId, text });
   const rafRef = useRef<number | null>(null);
-  const timerRef = useRef<number | null>(null);
-  const startedAtRef = useRef(0);
+  const renderedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const measureFromRef = useRef<number | null>(null);
   const costRef = useRef(0);
   const yieldsRef = useRef(0);
@@ -1281,19 +1280,13 @@ function useCoalescedStreamingText(
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
   }, []);
 
   useLayoutEffect(() => {
     const from = measureFromRef.current;
     if (from === null) return;
     measureFromRef.current = null;
-    requestAnimationFrame((frameTime) => {
-      costRef.current = Math.max(0, frameTime - from);
-    });
+    costRef.current = performance.now() - from;
   }, [displayed]);
 
   useEffect(() => {
@@ -1307,35 +1300,30 @@ function useCoalescedStreamingText(
       return;
     }
 
-    if (rafRef.current !== null || timerRef.current !== null) {
+    if (rafRef.current !== null) {
       return;
     }
 
-    const render = () => {
+    const render = (frameTime: number) => {
       rafRef.current = null;
+      if (
+        frameTime - renderedAtRef.current <
+        Math.max(16, STREAMING_RENDER_DUTY * costRef.current)
+      ) {
+        rafRef.current = requestAnimationFrame(render);
+        return;
+      }
       if (yieldsRef.current < STREAMING_INPUT_YIELDS && inputPending()) {
         yieldsRef.current += 1;
         rafRef.current = requestAnimationFrame(render);
         return;
       }
       yieldsRef.current = 0;
-      const now = performance.now();
-      startedAtRef.current = now;
-      measureFromRef.current = now;
+      renderedAtRef.current = frameTime;
+      measureFromRef.current = performance.now();
       setDisplayed(pendingRef.current);
     };
-    const wait =
-      startedAtRef.current +
-      Math.max(16, STREAMING_RENDER_DUTY * costRef.current) -
-      performance.now();
-    if (wait > 1) {
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null;
-        rafRef.current = requestAnimationFrame(render);
-      }, wait);
-    } else {
-      rafRef.current = requestAnimationFrame(render);
-    }
+    rafRef.current = requestAnimationFrame(render);
   }, [cancelScheduledRender, messageId, text, isStreaming]);
 
   useEffect(() => {
@@ -1526,7 +1514,9 @@ const MarkdownTextImpl = () => {
   );
   const messageTextKey = useAuiState(({ message }) =>
     allowSearchImages &&
-    !("status" in message && message.status?.type === "running")
+    memoOnArray(message.parts, "searchImages", () =>
+      searchImagesSignature(message.parts),
+    ) !== ""
       ? derivedForParts(message.parts).textKey
       : "[]",
   );

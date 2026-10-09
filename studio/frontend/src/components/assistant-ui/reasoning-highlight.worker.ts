@@ -28,10 +28,16 @@ self.onmessage ??= ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
     sources.delete(data.cancel);
     return;
   }
-  const source = reasoningHighlightSource(
+  let source = reasoningHighlightSource(
     sources.get(data.client) ?? "",
     data.source,
   );
+  for (const known of sources.values()) {
+    if (known === source) {
+      source = known;
+      break;
+    }
+  }
   sources.set(data.client, source);
   pending.set(data.client, { ...data, source });
   revisions.set(data.client, data.revision);

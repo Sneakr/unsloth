@@ -407,13 +407,23 @@ export function useFindInPage(
 
   const step = useCallback(
     (delta: number) => {
-      const count = matchesRef.current.length;
+      const matches = matchesRef.current;
+      const count = matches.length;
       if (count === 0) return;
       // Wraps, so the walk never dead-ends.
       activeRef.current = (activeRef.current + delta + count) % count;
+      const target = matches[activeRef.current];
+      if (staleRef.current) {
+        const range = rangeForMatch(indexRef.current, target);
+        if (!(range?.startContainer.isConnected && range.endContainer.isConnected)) {
+          activeStartRef.current = target.start;
+          search(true, reindex());
+          return;
+        }
+      }
       apply(true);
     },
-    [apply],
+    [apply, reindex, search],
   );
 
   const next = useCallback(() => step(1), [step]);

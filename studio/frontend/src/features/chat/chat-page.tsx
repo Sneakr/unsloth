@@ -900,7 +900,7 @@ const SingleContent = memo(function SingleContent({
           <div
             data-expanded={chatDock === "expanded" ? "true" : "false"}
             className={cn(
-              "pointer-events-auto flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
+              "flex h-full min-h-0 min-w-0 flex-col overflow-hidden [html[data-panel-resizing]_&]:pointer-events-auto",
               browserFullView &&
                 (chatDock === "minimized"
                   ? "chat-full-view-dock-minimized"

@@ -11,6 +11,9 @@ import {
 } from "zustand/middleware";
 import {
   getAppliedInterfaceZoom,
+  holdSkippedContent,
+  releaseSkippedContent,
+  remeasureSkippedContent,
   setAppliedInterfaceZoom,
 } from "../lib/interface-scale-runtime.ts";
 
@@ -108,6 +111,8 @@ let interfaceScaleApplicationQueue = Promise.resolve();
 /** Browser-only multiplier on --ui-font-scale; spacing and icons follow. */
 export const INTERFACE_SCALE_VAR = "--ui-interface-scale";
 
+let appliedWebZoom: number | null = null;
+
 /**
  * The browser scales through the UI tokens, not CSS `zoom`: root zoom inflates
  * viewport units (a 100dvh shell overflows at 125%).
@@ -116,6 +121,10 @@ function applyWebInterfaceScale(scale: number): void {
   if (typeof document === "undefined") return;
   const zoom = interfaceScaleToZoom(scale);
   setLayoutScale(zoom);
+  if (appliedWebZoom !== null && appliedWebZoom !== zoom) {
+    remeasureSkippedContent();
+  }
+  appliedWebZoom = zoom;
   const style = document.documentElement.style;
   if (zoom === 1) style.removeProperty(INTERFACE_SCALE_VAR);
   else style.setProperty(INTERFACE_SCALE_VAR, String(zoom));
@@ -126,27 +135,16 @@ export function webInterfaceScaleFactor(scale: number): number {
   return isTauri ? 1 : interfaceScaleToZoom(scale);
 }
 
-const ZOOMING_ATTRIBUTE = "data-interface-zooming";
-const ZOOMING_RELEASE_MS = 300;
 const holdsContainmentAcrossZoom = !(
   typeof navigator !== "undefined" && navigator.userAgent.includes("Windows")
 );
-let zoomingRelease: ReturnType<typeof setTimeout> | null = null;
 
 function holdContainmentAcrossZoom(): void {
-  if (!holdsContainmentAcrossZoom) return;
-  if (zoomingRelease !== null) clearTimeout(zoomingRelease);
-  zoomingRelease = null;
-  document.documentElement.setAttribute(ZOOMING_ATTRIBUTE, "");
+  if (holdsContainmentAcrossZoom) holdSkippedContent();
 }
 
 function releaseContainmentAfterZoom(): void {
-  if (!holdsContainmentAcrossZoom) return;
-  if (zoomingRelease !== null) clearTimeout(zoomingRelease);
-  zoomingRelease = setTimeout(() => {
-    zoomingRelease = null;
-    document.documentElement.removeAttribute(ZOOMING_ATTRIBUTE);
-  }, ZOOMING_RELEASE_MS);
+  if (holdsContainmentAcrossZoom) releaseSkippedContent();
 }
 
 export function applyInterfaceScale(scale: number): Promise<void> {

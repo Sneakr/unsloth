@@ -18,6 +18,7 @@ test("the worker announces itself last, after its handler and highlighter exist"
   assert.ok(ready > WORKER.indexOf("const highlighter = createCodePlugin("));
   assert.equal(WORKER.slice(ready).trim().split("\n").length, 1, "nothing follows the ready message");
   assert.ok(WORKER.includes("orderHighlightRequests([...pending.values()])"));
+  assert.match(WORKER, /for \(const known of sources\.values\(\)\) \{\s*if \(known === source\) \{\s*source = known;\s*break;\s*\}\s*\}\s*sources\.set\(data\.client, source\);/, "every group of a long thinking fence sends the same source, and the worker keeps one copy of it");
   assert.match(WORKER, /catch \{\s*if \(current\(\)\) \{\s*self\.postMessage\(\s*reasoningHighlightFailure\(request\.client, request\.revision\),/);
 });
 
@@ -43,7 +44,8 @@ test("a failed worker is never rebuilt and every waiting caller hears about it o
   const writes = HOOK.match(/state = "unavailable";/g) ?? [];
   assert.equal(writes.length, 3, "fail() and the two constructor guards; a stall is not a failure");
   const idle = HOOK.slice(HOOK.indexOf("function scheduleIdle("), HOOK.indexOf("export function requestFullHighlight("));
-  assert.equal(idle.includes("state ="), false, "the idle teardown never changes the state");
+  assert.match(idle, /worker = null;\s*if \(state === "stalled"\) state = "untested";/, "a late worker that idles out takes its stall with it, so the next request boots a fresh one");
+  assert.equal((idle.match(/\bstate = "/g) ?? []).length, 1, "and the teardown never lifts an unavailable worker");
   assert.ok(HOOK.includes("afterQueuedMessages(() => stall(instance))"));
   assert.ok(HOOK.includes("new MessageChannel()"));
   assert.match(HOOK, /const READY_TIMEOUT_MS = 5_000;/);
@@ -65,11 +67,11 @@ test("a fence too long for the main thread stays plain without the worker, and t
   assert.ok(HOOK.includes("if (!instance) return runFallback();"));
   assert.match(HOOK, /if \(reply\.failed\) \{\s*sent\.current = null;\s*if \(revision\.current !== version\) return;\s*cancelFallback = runFallback\(\);\s*return;\s*\}/);
   assert.match(HOOK, /\(\) => \(\) => \{\s*revision\.current \+= 1;/, "an unmounted group never queues a fallback");
-  assert.ok(TRANSCRIPT.includes("highlightFenceSource(code.source, code.language, late)"), "the fallback tokenizes exactly the string the worker tokenizes");
+  assert.ok(TRANSCRIPT.includes("highlightFenceSource(source, code.language, late)"), "the fallback tokenizes exactly the string the worker tokenizes");
   assert.match(WORKER, /if \(request\.full && result !== null\) forget\(\);/, "a finished whole-fence request leaves nothing behind in the worker");
   assert.match(WORKER, /if \(request\.full && result === null && current\(\)\) \{\s*guard = setTimeout\(\(\) => \{\s*guard = null;\s*if \(!current\(\)\) return;\s*self\.postMessage\(\s*reasoningHighlightFailure\(request\.client, request\.revision\),\s*\);\s*forget\(\);\s*\}, FULL_REPLY_GUARD_MS\);/, "a whole-fence request whose grammar never loads is answered with a failure, so the speculator's slot is freed and the worker can idle");
   assert.match(WORKER, /const FULL_REPLY_GUARD_MS = 15_000;/);
-  assert.match(TRANSCRIPT, /code\.incomplete \|\| code\.source\.length > MAIN_THREAD_HIGHLIGHT_CHARS\s*\? null\s*: fallback,/);
+  assert.match(TRANSCRIPT, /code\.incomplete \|\| source\.length > MAIN_THREAD_HIGHLIGHT_CHARS\s*\? null\s*: fallback,/);
   assert.match(TRANSCRIPT, /const withoutIdleCallback =\s*typeof window !== "undefined" &&\s*typeof window\.requestIdleCallback !== "function";\s*const MAIN_THREAD_HIGHLIGHT_CHARS = withoutIdleCallback\s*\? 2_000\s*: MAX_HIGHLIGHT_CHARS;/, "JavaScriptCore interprets the grammars' lookbehind regexes, so WebKit tokenizes far less on the main thread");
   assert.match(TRANSCRIPT, /import \{[^}]*\bMAX_HIGHLIGHT_CHARS\b[^}]*\} from "@\/lib\/markdown-plugins";/);
 });

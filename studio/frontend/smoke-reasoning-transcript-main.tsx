@@ -6,7 +6,6 @@ import "@/features/chat/stores/sidebar-organization-store";
 import { useChatPreferencesStore } from "@/features/chat";
 /* eslint-enable no-restricted-imports */
 import { Thread } from "@/components/assistant-ui/thread";
-import { applyReasoningRowContainment } from "@/components/assistant-ui/reasoning-row-containment";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   AssistantRuntimeProvider,
@@ -133,7 +132,6 @@ function Api() {
         started = 0;
         finished = 0;
         frames = [];
-        rowSteps.length = 0;
         aui.thread().import(ExportedMessageRepository.fromArray([]));
         aui.thread().append({
           role: "user",
@@ -141,7 +139,6 @@ function Api() {
         });
       },
       seed(options: Options = {}) {
-        rowSteps.length = 0;
         source =
           options.text ??
           fixture(options.size ?? 100000, options.kind ?? "mixed");
@@ -179,25 +176,6 @@ function Api() {
               ?.length ?? 0,
           fragments: document.querySelectorAll("[data-reasoning-fragment]")
             .length,
-          rows: document.querySelectorAll("[data-reasoning-row]").length,
-          reserve: [
-            ...document.querySelectorAll<HTMLElement>("[data-reasoning-reserve]"),
-          ].reduce((sum, spacer) => sum + spacer.offsetHeight, 0),
-          steps: [...rowSteps],
-          removed: rowsRemoved,
-          rendered:
-            document.querySelectorAll("[data-reasoning-row]").length -
-            [...skippedChunks]
-              .filter((chunk) => chunk.isConnected)
-              .reduce(
-                (sum, chunk) =>
-                  sum + chunk.querySelectorAll("[data-reasoning-row]").length,
-                0,
-              ),
-          contained:
-            document.documentElement.getAttribute(
-              "data-reasoning-row-containment",
-            ) === "on",
         };
       },
     };
@@ -205,44 +183,6 @@ function Api() {
     return () => cancelAnimationFrame(frame);
   }, [aui]);
   return null;
-}
-
-const skippedChunks = new Set<Element>();
-const rowSteps: number[] = [];
-let rowsRemoved = 0;
-const watchSkippedRows = (root: Element): void => {
-  const attach = (chunk: Element) => {
-    chunk.addEventListener("contentvisibilityautostatechange", (event) => {
-      if ((event as Event & { skipped: boolean }).skipped && chunk.isConnected)
-        skippedChunks.add(chunk);
-      else skippedChunks.delete(chunk);
-    });
-  };
-  for (const chunk of root.querySelectorAll("[data-reasoning-chunk]")) attach(chunk);
-  new MutationObserver((records) => {
-    let added = 0;
-    for (const record of records) {
-      for (const node of record.addedNodes) {
-        if (!(node instanceof Element)) continue;
-        if (node.matches("[data-reasoning-chunk]")) attach(node);
-        for (const chunk of node.querySelectorAll("[data-reasoning-chunk]")) attach(chunk);
-        if (node.matches("[data-reasoning-row]")) added += 1;
-        added += node.querySelectorAll("[data-reasoning-row]").length;
-      }
-      for (const node of record.removedNodes) {
-        if (!(node instanceof Element)) continue;
-        if (node.matches("[data-reasoning-row]")) rowsRemoved += 1;
-        rowsRemoved += node.querySelectorAll("[data-reasoning-row]").length;
-        skippedChunks.delete(node);
-        for (const chunk of node.querySelectorAll("[data-reasoning-chunk]")) skippedChunks.delete(chunk);
-      }
-    }
-    if (added > 0) rowSteps.push(added);
-  }).observe(root, { childList: true, subtree: true });
-};
-if (typeof document !== "undefined") {
-  applyReasoningRowContainment();
-  watchSkippedRows(document.documentElement);
 }
 
 function Harness() {

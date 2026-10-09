@@ -8,6 +8,7 @@ import {
   derivedForParts,
   memoOnArray,
 } from "../src/components/assistant-ui/message-derived.ts";
+import { readSrc } from "./helpers/kit.ts";
 
 const parts = [
   { type: "reasoning", text: "thinking" },
@@ -70,4 +71,12 @@ test("memoOnArray caches per array and per key", () => {
   assert.equal(other, 1);
   assert.equal(computed, 2);
   assert.notEqual(memoOnArray([...messages], "k", () => new Set()), first, "a new array computes anew");
+});
+
+test("a message with search images lists its texts while it runs, so a card placed later stops an earlier part repeating it", () => {
+  assert.match(
+    readSrc("components/assistant-ui/markdown-text.tsx"),
+    /const messageTextKey = useAuiState\(\(\{ message \}\) =>\s*allowSearchImages &&\s*memoOnArray\(message\.parts, "searchImages", \(\) =>\s*searchImagesSignature\(message\.parts\),\s*\) !== ""\s*\? derivedForParts\(message\.parts\)\.textKey\s*: "\[\]",\s*\);/,
+    "without images the texts change nothing, so only then may a running reply skip serialising them",
+  );
 });

@@ -395,11 +395,13 @@ export function useIntentAwareAutoScroll(): {
         settleCheckDue = false;
         // Park first so a frame without an observer record can't overshoot.
         parkIfHeld();
-        if (pendingInitialPin && el.scrollHeight > el.clientHeight) {
+        if (pendingInitialPin && el.querySelector("[data-role]") !== null) {
           pendingInitialPin = false;
-          parked = false;
-          userDetachedRef.current = false;
-          extendFollow();
+          if (el.scrollHeight > el.clientHeight) {
+            parked = false;
+            userDetachedRef.current = false;
+            extendFollow();
+          }
         }
         const following =
           !userDetachedRef.current &&

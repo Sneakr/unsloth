@@ -47,3 +47,12 @@ test("a scroll-up key opens the window in which a shorter page still counts as t
   assert.match(HOOK, /el\.ownerDocument\.addEventListener\("keydown", onKeyDown, \{\s*passive: true,\s*\}\);/);
   assert.match(HOOK, /el\.ownerDocument\.removeEventListener\("keydown", onKeyDown\);/);
 });
+
+test("the first pin waits for the messages, then gives way to any later detach", () => {
+  const tick = between("const tick = (): void => {", "const following =");
+  assert.match(
+    tick,
+    /if \(pendingInitialPin && el\.querySelector\("\[data-role\]"\) !== null\) \{\s*pendingInitialPin = false;\s*if \(el\.scrollHeight > el\.clientHeight\) \{\s*parked = false;\s*userDetachedRef\.current = false;\s*extendFollow\(\);\s*\}\s*\}/,
+    "a thread that opens without overflowing has nothing to pin, so opening a card by hand in it later keeps the view where the reader put it",
+  );
+});

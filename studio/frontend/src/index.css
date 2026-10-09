@@ -5277,7 +5277,7 @@ html.force-reduced-motion .sidebar-section-drop-line {
 		scrollbar-color: oklch(0.72 0 0 / 0.4) transparent !important;
 	}
 
-	@media screen {
+	@media screen and (forced-colors: none) {
 		:root.client-windows[data-low-device-scale] .aui-thread-viewport:not(.chat-full-view-dock *) {
 			scrollbar-gutter: auto;
 			overflow-y: scroll;

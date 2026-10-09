@@ -32,7 +32,7 @@ test("a desktop zoom shows skipped content until WebKit has measured it at the n
   const store = readSrc("features/settings/stores/interface-scale-store.ts");
   assert.match(store, /holdContainmentAcrossZoom\(\);\s*try \{\s*await getCurrentWebview\(\)\.setZoom\(zoom\);\s*\} finally \{\s*releaseContainmentAfterZoom\(\);\s*\}/);
   assert.match(store, /const holdsContainmentAcrossZoom = !\(\s*typeof navigator !== "undefined" && navigator\.userAgent\.includes\("Windows"\)\s*\);/, "WebView2 rescales remembered sizes itself");
-  assert.match(store, /const ZOOMING_RELEASE_MS = 300;/);
+  assert.match(readSrc("features/settings/lib/interface-scale-runtime.ts"), /const ZOOMING_RELEASE_MS = 300;/);
   const css = readSrc("index.css");
   assert.match(css, /html\[data-interface-zooming\] \.aui-thread-root \[data-slot="reasoning-transcript"\] > \[data-reasoning-chunk\],\s*html\[data-interface-zooming\] \.aui-thread-root \[data-streamdown="code-block-body"\]\[data-unsloth-fence-windowed\],\s*html\[data-interface-zooming\] \.aui-thread-root \.aui-math-block,\s*html\[data-interface-zooming\] \.aui-thread-root \.aui-math-display \{\s*content-visibility: visible !important;\s*\}/, "WebKit keeps contain-intrinsic-size: auto sizes in the old zoom's units, maths blocks included");
   assert.match(store, /interfaceScaleApplicationQueue = Promise\.resolve\(\);\s*releaseContainmentAfterZoom\(\);\s*resolve\(\);/, "a setZoom that never settles must not leave every skipped block rendered");
@@ -48,8 +48,8 @@ test("below 1.5x device scale the Windows thread scrolls on the compositor and k
   const css = readSrc("index.css");
   assert.match(
     css,
-    /@media screen \{\s*:root\.client-windows\[data-low-device-scale\] \.aui-thread-viewport:not\(\.chat-full-view-dock \*\) \{\s*scrollbar-gutter: auto;\s*overflow-y: scroll;\s*border-inline-start: var\(--thread-scrollbar-gutter\) solid transparent;\s*background-color: var\(--background\);\s*\}\s*\}/,
-    "Chromium composites a scroller below 1.5x only when its scrolling background is opaque, which it paints that way only with an auto gutter; the always-on bar and the start border keep the stable both-edges geometry",
+    /@media screen and \(forced-colors: none\) \{\s*:root\.client-windows\[data-low-device-scale\] \.aui-thread-viewport:not\(\.chat-full-view-dock \*\) \{\s*scrollbar-gutter: auto;\s*overflow-y: scroll;\s*border-inline-start: var\(--thread-scrollbar-gutter\) solid transparent;\s*background-color: var\(--background\);\s*\}\s*\}/,
+    "Chromium composites a scroller below 1.5x only when its scrolling background is opaque, which it paints that way only with an auto gutter; the always-on bar and the start border keep the stable both-edges geometry. A contrast theme paints that transparent border in its text colour, so forced colours keep the stable gutter",
   );
   const supports = css.lastIndexOf("@supports selector(::-webkit-scrollbar)", css.indexOf("[data-low-device-scale]"));
   assert.ok(supports > css.indexOf(".aui-thread-viewport {\n\t/* Reserve scrollbar space"), "the Chromium-only scrollbar block holds it, so Firefox keeps its own scrolling");
