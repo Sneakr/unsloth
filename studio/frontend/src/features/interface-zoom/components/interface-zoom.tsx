@@ -217,6 +217,7 @@ export function InterfaceZoom() {
     const armWheel = () => {
       if (wheelArmed) return;
       wheelArmed = true;
+      window.removeEventListener("wheel", onWheel);
       window.addEventListener("wheel", onWheel, { passive: false });
     };
     const disarmWheel = () => {
@@ -235,6 +236,7 @@ export function InterfaceZoom() {
       syncWheel();
     };
     const onPointerOver = (event: PointerEvent) => {
+      modifierHeld = event.ctrlKey || event.metaKey;
       pointerInScope = zoomScopeFor(event.target) !== null;
       syncWheel();
     };
@@ -256,7 +258,7 @@ export function InterfaceZoom() {
       window.removeEventListener("keyup", onModifierChange, true);
       window.removeEventListener("pointerover", onPointerOver, true);
       window.removeEventListener("blur", onBlur);
-      disarmWheel();
+      window.removeEventListener("wheel", onWheel);
     };
   }, []);
 
