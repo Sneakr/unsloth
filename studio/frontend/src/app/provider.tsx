@@ -607,6 +607,7 @@ const CUSTOM_CHROME_STYLE = {
   "--studio-content-top-inset": "34px",
   "--studio-non-chat-content-top-inset": "34px",
   "--studio-non-chat-scroller-top": "34px",
+  "--studio-chat-scroller-top": "34px",
   "--studio-hidden-route-top-inset": "34px",
   // Same split as the native-mac block: chat chrome scales, window chrome does not.
   "--studio-chat-header-height": "calc(48px * var(--ui-space-scale, 1))",

@@ -2326,7 +2326,7 @@ export const Thread: FC<{
                 : // + the chat-model notice, which is an opaque absolute bar
                   // directly under the header. 0px whenever it is not showing,
                   // so every other surface keeps the padding it had.
-                  "[--thread-header-offset:calc(var(--studio-content-top-inset,0px)+var(--studio-chat-header-height,48px)+var(--studio-chat-notice-height,0px))] pt-[var(--thread-header-offset)]",
+                  "[--thread-header-offset:calc(var(--studio-content-top-inset,0px)-var(--studio-chat-scroller-top,0px)+var(--studio-chat-header-height,48px)+var(--studio-chat-notice-height,0px))] mt-[var(--studio-chat-scroller-top,0px)] pt-[var(--thread-header-offset)]",
             )}
           />
           <GeneratedImageViewportOverlay

@@ -7,6 +7,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import {
   SIDEBAR_WIDTH_MIN,
   clampSidebarWidth,
+  useSidebarWidth,
 } from "@/hooks/use-sidebar-width";
 import { useT } from "@/i18n";
 import { isTauri } from "@/lib/api-base";
@@ -42,13 +43,15 @@ export function SidebarEdgeTrigger({
     pinned,
     setPeeking,
     toggleSidebar,
+  } = useSidebar();
+  const {
     width,
-    widthScale,
-    storedWidth,
-    maxWidth,
+    scale: widthScale,
+    stored: storedWidth,
+    max: maxWidth,
     setWidth,
     resetWidth,
-  } = useSidebar();
+  } = useSidebarWidth();
   // A drag that reaches the minimum pins the sidebar part-way through, which
   // would unmount this: the handle would lose pointer capture and the width
   // would never commit. Hold on until the pointer is released.
