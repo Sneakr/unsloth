@@ -4,7 +4,6 @@
 import {
   Component,
   type CSSProperties,
-  Fragment as InlineFragment,
   memo,
   startTransition,
   useCallback,
@@ -17,17 +16,11 @@ import {
 import { flushSync } from "react-dom";
 import {
   CodeBlockActions,
-  highlightFenceSource,
   MarkdownTextSource,
   SearchImagesEnabledContext,
 } from "./markdown-text";
-import { MAX_HIGHLIGHT_CHARS } from "@/lib/markdown-plugins";
-import { FenceLine, upgradeFencesForPrint } from "./code-fence-defer";
-import {
-  useReasoningHighlight,
-  type ReasoningFallbackHighlight,
-  type ReasoningLineTokens,
-} from "./use-reasoning-highlight";
+import { CodeHighlightEnabledContext } from "./code-highlight-context";
+import { upgradeFencesForPrint } from "./code-fence-defer";
 import {
   cachedReasoningTranscriptIndex,
   resolveReasoningAnchor,
@@ -52,7 +45,6 @@ import {
   estimateFragmentHeight,
   type FragmentGeometry,
   frameBudget,
-  groupKeyOf,
   INITIAL_VIEWPORTS,
   initialRows,
   isCovered,
@@ -93,9 +85,6 @@ const blindTranscripts = new WeakSet<Element>();
 const withoutIdleCallback =
   typeof window !== "undefined" &&
   typeof window.requestIdleCallback !== "function";
-const MAIN_THREAD_HIGHLIGHT_CHARS = withoutIdleCallback
-  ? 2_000
-  : MAX_HIGHLIGHT_CHARS;
 
 const settleQueue = createSettleQueue<HTMLElement>(
   (callback) => requestAnimationFrame(callback),
@@ -236,79 +225,12 @@ function useSettledRow(
   }, [row, active]);
 }
 
-const CodeFragment = memo(
-  function CodeFragment({
-    fragment,
-    result,
-    leading,
-  }: {
-    fragment: ReasoningFragment;
-    result: ReasoningLineTokens;
-    leading: boolean;
-  }) {
-    const code = fragment.code!;
-    return (
-      <>
-        {code.lines.map(({ line, column, text }, at) => {
-          const tokens = result.get(line);
-          const separator =
-            column === 0 && line > 0 && !(leading && at === 0) ? "\n" : "";
-          // A delayed grammar must never display the previous, shorter source.
-          if (
-            !tokens ||
-            tokens
-              .map((token) => token.content)
-              .join("")
-              .slice(column, column + text.length) !== text
-          ) {
-            return (
-              <InlineFragment key={`${line}:${column}`}>
-                {separator}
-                {text}
-              </InlineFragment>
-            );
-          }
-          let offset = 0;
-          const clipped = tokens.flatMap((token) => {
-            const start = offset;
-            offset += token.content.length;
-            const content = token.content.slice(
-              Math.max(0, column - start),
-              Math.max(
-                0,
-                Math.min(token.content.length, column + text.length - start),
-              ),
-            );
-            return content ? [{ ...token, content }] : [];
-          });
-          return (
-            <InlineFragment key={`${line}:${column}`}>
-              {separator}
-              <FenceLine line={clipped} windowed inline />
-            </InlineFragment>
-          );
-        })}
-      </>
-    );
-  },
-  (previous, next) => {
-    // Appending later lines cannot change this fragment's grammar or text. Keep its
-    // highlighted subtree and selection alive instead of repainting it for every token.
-    const a = previous.fragment;
-    const b = next.fragment;
-    return (
-      a.key === b.key &&
-      a.text === b.text &&
-      a.first === b.first &&
-      a.last === b.last &&
-      previous.leading === next.leading &&
-      a.code?.language === b.code?.language &&
-      a.code!.lines.every(
-        ({ line }) => previous.result.get(line) === next.result.get(line),
-      )
-    );
-  },
-);
+const codeRowText = (fragment: ReasoningFragment, leading: boolean): string =>
+  fragment.code!.lines
+    .map(({ line, column, text }, at) =>
+      column === 0 && line > 0 && !(leading && at === 0) ? `\n${text}` : text,
+    )
+    .join("");
 
 function Row({
   index,
@@ -356,81 +278,22 @@ function Chunk({
 }
 
 function CodeGroup({
-  fence,
   indices,
   fragments,
   streaming,
 }: {
-  fence: string;
   indices: number[];
   fragments: readonly ReasoningFragment[];
   streaming: boolean;
 }) {
-  const surface = useRef<HTMLDivElement>(null);
-  const [reached, setReached] = useState(
-    () => typeof IntersectionObserver === "undefined",
-  );
   const code = fragments[indices[0]].code!;
   const first = fragments[indices[0]];
   const last = fragments[indices[indices.length - 1]];
-  const growing = streaming && code.incomplete;
-  const frozen = growing && !last.last;
-  const [stableSource, setStableSource] = useState<{
-    key: string;
-    source: string;
-  } | null>(null);
-  if (frozen ? stableSource?.key !== last.key : stableSource !== null)
-    setStableSource(frozen ? { key: last.key, source: code.source } : null);
-  const source =
-    frozen && stableSource?.key === last.key
-      ? stableSource.source
-      : code.source;
   const breaksAfter =
     !last.last &&
     fragments[indices[indices.length - 1] + 1]?.code?.lines[0]?.column === 0;
-  useEffect(() => {
-    const element = surface.current;
-    if (!element || reached || typeof IntersectionObserver === "undefined")
-      return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        observer.disconnect();
-        setReached(true);
-      },
-      {
-        root: element.closest(".aui-thread-viewport"),
-        rootMargin: "100% 0px",
-      },
-    );
-    observer.observe(element.closest("[data-reasoning-chunk]") ?? element);
-    return () => observer.disconnect();
-  }, [reached]);
-  const lines = useMemo(() => {
-    if (!reached) return [];
-    const all: number[] = [];
-    for (const index of indices) {
-      for (const line of fragments[index].code!.lines) all.push(line.line);
-    }
-    return all;
-  }, [reached, indices, fragments]);
-  const fallback = useCallback<ReasoningFallbackHighlight>(
-    (late) => highlightFenceSource(source, code.language, late),
-    [source, code.language],
-  );
-  const result = useReasoningHighlight(
-    fence,
-    source,
-    code.language,
-    lines,
-    code.incomplete || source.length > MAIN_THREAD_HIGHLIGHT_CHARS
-      ? null
-      : fallback,
-    !growing || !last.last,
-  );
   return (
     <div
-      ref={surface}
       data-slot="reasoning-code-fragment"
       data-language={code.language ?? undefined}
       data-reasoning-row=""
@@ -461,11 +324,7 @@ function CodeGroup({
               data-reasoning-fragment={fragments[index].key}
               data-reasoning-code-row=""
             >
-              <CodeFragment
-                fragment={fragments[index]}
-                result={result}
-                leading={at === 0}
-              />
+              {codeRowText(fragments[index], at === 0)}
             </span>
           ))}
           {breaksAfter && "\n"}
@@ -1078,7 +937,6 @@ export function ReasoningTranscript({
       return (
         <CodeGroup
           key={group.key}
-          fence={`${messageId}:${groupKeyOf(fragments[slice.first])}`}
           indices={indices}
           fragments={fragments}
           streaming={streaming}
@@ -1141,23 +999,25 @@ export function ReasoningTranscript({
 
   return (
     <SearchImagesEnabledContext.Provider value={false}>
-      <div
-        ref={root}
-        data-slot="reasoning-transcript"
-        className="relative min-w-0"
-        style={{ overflowAnchor: "none" }}
-      >
+      <CodeHighlightEnabledContext.Provider value={false}>
         <div
-          ref={codeProbe}
-          aria-hidden
-          className="aui-reasoning-code-fragment aui-reasoning-code-last pointer-events-none invisible absolute"
+          ref={root}
+          data-slot="reasoning-transcript"
+          className="relative min-w-0"
+          style={{ overflowAnchor: "none" }}
         >
-          <div className="aui-reasoning-code-lines" />
+          <div
+            ref={codeProbe}
+            aria-hidden
+            className="aui-reasoning-code-fragment aui-reasoning-code-last pointer-events-none invisible absolute"
+          >
+            <div className="aui-reasoning-code-lines" />
+          </div>
+          <CommitBounds before={beforeCommit} after={afterCommit}>
+            {rendered}
+          </CommitBounds>
         </div>
-        <CommitBounds before={beforeCommit} after={afterCommit}>
-          {rendered}
-        </CommitBounds>
-      </div>
+      </CodeHighlightEnabledContext.Provider>
     </SearchImagesEnabledContext.Provider>
   );
 }

@@ -63,8 +63,6 @@ test("without requestIdleCallback, main-thread grammar work waits for the reader
   const defer = readSrc("components/assistant-ui/code-fence-defer.tsx");
   assert.match(defer, /const warmMustWait = \(\): boolean =>\s*typeof \(globalThis as Record<string, unknown>\)\.requestIdleCallback !== "function"\s*&& \(streamActive\(\) \|\| inputQuietIn\(\) > 0\);/);
   assert.ok(defer.indexOf("if (warmMustWait()) {") < defer.indexOf("grammarsWarmed.add(language);"), "a warm that has to wait does not mark its grammar warmed");
-  const highlight = readSrc("components/assistant-ui/use-reasoning-highlight.ts");
-  assert.match(highlight, /const quietIn = inputQuietIn\(\);\s*if \(quietIn > 0\) \{\s*const timer = setTimeout\(drainFallback, quietIn\);\s*fallbackPending = \(\) => clearTimeout\(timer\);\s*return;\s*\}\s*fallbackQueue\.shift\(\)\?\.\(\);/, "a fallback tokenization never starts in the middle of a scroll");
 });
 
 test("settled fences go to the worker where the main thread's regex engine is slow", () => {

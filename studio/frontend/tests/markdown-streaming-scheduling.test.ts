@@ -105,8 +105,12 @@ test("token updates keep Streamdown's expensive configuration props stable", () 
   const streamdown = findChatStreamdown();
   assert.ok(streamdown, "chat <Streamdown> is missing");
 
+  assert.equal(
+    jsxAttribute(streamdown, "plugins")?.initializer?.getText(source).replace(/\s+/g, " "),
+    "{ highlightCode ? STREAMDOWN_PLUGINS : STREAMDOWN_PLAIN_CODE_PLUGINS }",
+    "plugins must retain object identity while raw tokens arrive",
+  );
   for (const [attribute, constant] of [
-    ["plugins", "STREAMDOWN_PLUGINS"],
     ["controls", "STREAMDOWN_CONTROLS"],
     ["shikiTheme", "STREAMDOWN_SHIKI_THEME"],
   ]) {

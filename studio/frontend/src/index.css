@@ -5308,6 +5308,18 @@ html.force-reduced-motion .sidebar-section-drop-line {
 	initial-value: 0px;
 }
 
+@property --unsloth-fence-height {
+	syntax: "<length>";
+	inherits: false;
+	initial-value: 0px;
+}
+
+@property --unsloth-chunk-estimate {
+	syntax: "<length>";
+	inherits: false;
+	initial-value: 0px;
+}
+
 /* Marker class applied only to actual streaming-thread viewports
    (see ThreadPrimitive.Viewport in components/assistant-ui/thread.tsx).
    Scoped separately from `.aui-thread-viewport` because that class is

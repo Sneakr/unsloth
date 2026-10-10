@@ -90,6 +90,10 @@ test("the component writes the measured height before paint and only when it cha
   assert.ok(measure.indexOf("setProperty(FENCE_HEIGHT_PROPERTY") < measure.indexOf("const reach ="), "written before the far-away early return, so a fence measured once always carries its height");
 });
 
+test("the measured height does not inherit, so a streamed line restyles only the box it sizes", () => {
+  assert.ok(new RegExp(`@property ${FENCE_HEIGHT_PROPERTY} \\{\\s*syntax: "<length>";\\s*inherits: false;\\s*initial-value: 0px;\\s*\\}`).test(INDEX_CSS), "registered, so a write restyles the box and not every line inside it");
+});
+
 test("the window measure never reads inside a body that may be skipped", () => {
   const measure = DEFER.slice(DEFER.indexOf("measure.current = () => {"), DEFER.indexOf("useLayoutEffect(() => {", DEFER.indexOf("measure.current = () => {")));
   assert.ok(!/(node|body|code\.current)\.getBoundingClientRect|rectDuringFrame\(body\)/.test(measure), "descendant rects are read by readFenceMetrics on registration and resize only");

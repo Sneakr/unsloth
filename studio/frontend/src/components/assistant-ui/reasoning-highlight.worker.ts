@@ -28,22 +28,10 @@ self.onmessage ??= ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
     sources.delete(data.cancel);
     return;
   }
-  const base = typeof data.source === "string" ? undefined : data.source.base;
-  const held = sources.get(base ?? data.client);
-  if (typeof data.source !== "string" && held === undefined) {
-    pending.delete(data.client);
-    revisions.delete(data.client);
-    sources.delete(data.client);
-    self.postMessage(reasoningHighlightFailure(data.client, data.revision));
-    return;
-  }
-  let source = reasoningHighlightSource(held ?? "", data.source);
-  for (const known of sources.values()) {
-    if (known === source) {
-      source = known;
-      break;
-    }
-  }
+  const source = reasoningHighlightSource(
+    sources.get(data.client) ?? "",
+    data.source,
+  );
   sources.set(data.client, source);
   pending.set(data.client, { ...data, source });
   revisions.set(data.client, data.revision);
@@ -85,7 +73,7 @@ self.onmessage ??= ({ data }: MessageEvent<ReasoningHighlightCommand>) => {
           language: normalizeLanguage(request.language ?? "text"),
           themes: [...themes],
         };
-        const result = request.full || request.exact
+        const result = request.full
           ? highlighter.highlightExact(options, publish)
           : highlighter.highlight(options, publish);
         publish(result);

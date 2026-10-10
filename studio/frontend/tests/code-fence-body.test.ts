@@ -49,7 +49,7 @@ test("a blank line is one line tall, not nothing", () => {
   assert.equal(isBlankLine([{ content: " " }]), false);
   assert.equal(isBlankLine([{ content: "" }, { content: "" }]), false);
   assert.ok(
-    /if \(!inline && isBlankLine\(line\)\) \{\s*return <span className=\{LINE_CLASS\}>\{"\\n"\}<\/span>;/
+    /if \(isBlankLine\(line\)\) \{\s*return <span className=\{LINE_CLASS\}>\{"\\n"\}<\/span>;/
       .test(DEFER),
     "a blank line must render the newline streamdown renders for it",
   );
@@ -88,7 +88,7 @@ test("the fence branch no longer renders streamdown's Block", () => {
 
 test("a streaming open fence is highlighted rather than shown plain", () => {
   assert.ok(
-    /if \(props\.isIncomplete\) \{\s*const openFence = markdownBlockFallback\(props\.content\);\s*if \(openFence\.fenced\) \{\s*return \(\s*<StreamingFenceBlock/m
+    /if \(props\.isIncomplete\) \{\s*const openFence = markdownBlockFallback\(props\.content\);\s*if \(openFence\.fenced\) \{\s*return highlightCode \? \(\s*<StreamingFenceBlock/m
       .test(MARKDOWN_TEXT),
     "an open fence must leave the bare Block route",
   );
@@ -100,6 +100,16 @@ test("a streaming open fence is highlighted rather than shown plain", () => {
     "and it must render the tokens, not a plain shell: keeping the highlighting while it streams " +
       "is the difference between this and the change that was rejected",
   );
+});
+
+test("a fence in the thinking box is shown plain, with no highlighter behind it", () => {
+  assert.match(readSrc("components/assistant-ui/code-highlight-context.ts"), /export const CodeHighlightEnabledContext = createContext\(true\);/);
+  assert.equal((MARKDOWN_TEXT.match(/\) : \(\s*<PlainFenceBlock/g) ?? []).length, 3, "every fence route has a plain twin");
+  assert.match(MARKDOWN_TEXT, /const STREAMDOWN_PLAIN_CODE_PLUGINS = \{ math, mermaid \}/);
+  assert.match(MARKDOWN_TEXT, /plugins=\{\s*highlightCode \? STREAMDOWN_PLUGINS : STREAMDOWN_PLAIN_CODE_PLUGINS\s*\}/, "a fence nested in a list or a quote is plain too");
+  const start = MARKDOWN_TEXT.indexOf("function PlainFenceBlock(");
+  const plain = MARKDOWN_TEXT.slice(start, MARKDOWN_TEXT.indexOf("\n}\n", start));
+  assert.equal(/useFenceTokens|requestFullHighlight|code\.highlight|noteStreamingFence/.test(plain), false);
 });
 
 test("a completed fence on a non-``` form keeps the bounded renderer", () => {

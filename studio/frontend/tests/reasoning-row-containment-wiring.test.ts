@@ -16,7 +16,6 @@ import { readSrc } from "./helpers/kit.ts";
 const INDEX_CSS = readSrc("index.css");
 const TRANSCRIPT = readSrc("components/assistant-ui/reasoning-transcript.tsx");
 const ANCHOR = readSrc("components/assistant-ui/reasoning-reading-anchor.ts");
-const HIGHLIGHT = readSrc("components/assistant-ui/use-reasoning-highlight.ts");
 const MAIN = readSrc("main.tsx");
 const CONTAINMENT = readSrc("components/assistant-ui/reasoning-row-containment.ts");
 
@@ -46,6 +45,10 @@ test("every chunk records its size before any chunk can be skipped", () => {
   assert.equal(rule.includes("content-visibility"), false, "sizing alone: the skipping is gated separately");
   const [open, close] = layerBounds(INDEX_CSS, "utilities");
   assert.ok(at > open && at < close);
+});
+
+test("the chunk estimate does not inherit, so a growing chunk restyles only itself", () => {
+  assert.ok(new RegExp(`@property ${CHUNK_ESTIMATE_PROPERTY} \\{\\s*syntax: "<length>";\\s*inherits: false;\\s*initial-value: 0px;\\s*\\}`).test(INDEX_CSS), "registered, so a write restyles the chunk and not every element inside it");
 });
 
 test("only settled rows are skipped, and only where the engine finds skipped content", () => {
@@ -176,20 +179,13 @@ test("the DOM the rest of the app reads is unchanged", () => {
   assert.match(TRANSCRIPT, /for \(let i = firstEndingBelow\(rows, bounds\.top\); i < rows\.length; i \+= 1\) \{\s*const row = rows\[i\];\s*if \(row\.getBoundingClientRect\(\)\.top >= bounds\.bottom\) return undefined;/, "a fold row without capturable text falls through to the next visible row");
   assert.match(TRANSCRIPT, /const chunk = chunks\[at\];\s*if \(chunk\.getBoundingClientRect\(\)\.top >= bounds\.bottom\) break;/, "and on into the next chunk while it is still on screen");
   assert.match(TRANSCRIPT, /row\.removeAttribute\(ROW_SETTLED_ATTRIBUTE\);\s*settleQueue\.add\(row\);/, "re-settling goes through the same queue as the first settle");
-  assert.match(TRANSCRIPT, /observer\.disconnect\(\);\s*setReached\(true\);/, "a code group latches its highlighting one way");
   assert.match(TRANSCRIPT, /"aui-reasoning-code-fragment relative isolate min-w-0"/, "a code group positions its own copy actions; chunks settle now, so no containment around the group gives them a box");
-  assert.match(TRANSCRIPT, /observer\.observe\(element\.closest\("\[data-reasoning-chunk\]"\) \?\? element\);/, "and watches its chunk, whose box stays measurable while Firefox and WebKit skip the rows inside it");
-  assert.match(TRANSCRIPT, /root: element\.closest\("\.aui-thread-viewport"\),\s*rootMargin: "100% 0px",/, "rooted at the thread scroller, so the lookahead margin grows the box the reader scrolls");
   assert.match(TRANSCRIPT, /useState\(\(\) => cachedReasoningTranscriptIndex\(indexKey\)\)/, "a reopened transcript keeps the index it already parsed");
 });
 
 test("the per-frame reading capture reuses one Range", () => {
   assert.match(ANCHOR, /const range = \(probe \?\?= document\.createRange\(\)\);/, "one live Range for every capture: the engine walks every attached Range on each node removal, so a Range per text node per scrolled frame made the fence windows' span churn an order of magnitude dearer");
   assert.equal((ANCHOR.match(/document\.createRange\(\)/g) ?? []).length, 2, "the only other Range is the one a caller asked for by position");
-});
-
-test("the highlight worker is not asked for nothing", () => {
-  assert.match(HIGHLIGHT, /useEffect\(\(\) => \{\s*if \(lineKey === ""\) return;/);
 });
 
 test("startup arms the attribute after the code-block one", () => {

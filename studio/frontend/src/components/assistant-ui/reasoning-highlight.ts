@@ -6,11 +6,10 @@ import type { HighlightResult } from "@streamdown/code";
 export type ReasoningHighlightRequest = {
   client: number;
   revision: number;
-  source: string | { from: number; text: string; base?: number };
+  source: string | { from: number; text: string };
   language: string | null;
   lines: number[];
   full?: boolean;
-  exact?: boolean;
   speculative?: boolean;
 };
 
@@ -20,7 +19,7 @@ export type ReasoningHighlightCommand =
 
 export type ReasoningHighlightReady = { ready: true };
 
-/** A fence's complete source is sent once; later requests only edit a source the worker already holds. */
+/** A client sends its complete source once, then only newly appended bytes. */
 export function reasoningHighlightSource(
   previous: string,
   source: ReasoningHighlightRequest["source"],

@@ -91,6 +91,7 @@ import { derivedForParts, memoOnArray } from "./message-derived";
 import { MAX_HIGHLIGHT_CHARS } from "@/lib/markdown-plugins";
 import { markdownBlockFallback } from "./markdown-block-fallback";
 import { createCodePlugin } from "./code-plugin";
+import { CodeHighlightEnabledContext } from "./code-highlight-context";
 import { withMathBlockMarker } from "./math-block-marker";
 import {
   MarkdownBlockBoundary,
@@ -143,6 +144,9 @@ const code = createCodePlugin({
   themes: [unslothLightTheme, unslothDarkTheme],
 });
 const STREAMDOWN_PLUGINS = { code, math, mermaid } satisfies NonNullable<
+  StreamdownProps["plugins"]
+>;
+const STREAMDOWN_PLAIN_CODE_PLUGINS = { math, mermaid } satisfies NonNullable<
   StreamdownProps["plugins"]
 >;
 const STREAMDOWN_CONTROLS = {
@@ -744,6 +748,7 @@ function StreamdownBlockContent(props: BlockProps) {
   const messageHasRenderableRenderHtmlTool = useContext(
     RenderHtmlToolPresenceContext,
   );
+  const highlightCode = useContext(CodeHighlightEnabledContext);
   // ONE walk, both answers. `findMermaidFence` splits the block and scans every line, and asking
   // the two questions separately walked it twice on every render of every block. Measured on a
   // 3,000 line fence: 0.118 ms per walk, so the redundant one cost 0.092 ms per render, about
@@ -832,11 +837,20 @@ function StreamdownBlockContent(props: BlockProps) {
 
     return (
       <>
-        <FenceBlock
-          isIncomplete={props.isIncomplete}
-          language={codeFence.language}
-          source={codeFence.source}
-        />
+        {highlightCode ? (
+          <FenceBlock
+            isIncomplete={props.isIncomplete}
+            language={codeFence.language}
+            source={codeFence.source}
+          />
+        ) : (
+          <PlainFenceBlock
+            actions
+            isIncomplete={props.isIncomplete}
+            language={codeFence.language}
+            source={codeFence.source}
+          />
+        )}
         {svgSource && <SvgPreview source={svgSource} />}
       </>
     );
@@ -868,9 +882,14 @@ function StreamdownBlockContent(props: BlockProps) {
    */
   const settledFence = props.isIncomplete ? null : markdownBlockFallback(props.content);
   if (settledFence?.fenced && !(settledFence.language === "mermaid" && mermaidSource)) {
-    return (
+    return highlightCode ? (
       <StreamingFenceBlock
         isIncomplete={false}
+        language={settledFence.language}
+        source={settledFence.text}
+      />
+    ) : (
+      <PlainFenceBlock
         language={settledFence.language}
         source={settledFence.text}
       />
@@ -880,8 +899,13 @@ function StreamdownBlockContent(props: BlockProps) {
   if (props.isIncomplete) {
     const openFence = markdownBlockFallback(props.content);
     if (openFence.fenced) {
-      return (
+      return highlightCode ? (
         <StreamingFenceBlock
+          language={openFence.language}
+          source={openFence.text}
+        />
+      ) : (
+        <PlainFenceBlock
           language={openFence.language}
           source={openFence.text}
         />
@@ -1087,6 +1111,32 @@ function StreamingFenceBlock({
         windowing={isIncomplete || fenceMode() === "window"}
       />
     </MarkdownRendererBoundary>
+  );
+}
+
+function PlainFenceBlock({
+  actions = false,
+  isIncomplete,
+  language,
+  source,
+}: {
+  actions?: boolean;
+  isIncomplete?: boolean;
+  language: string | null;
+  source: string;
+}) {
+  const languageToken = language?.trim().split(/\s+/)[0] || null;
+  const shell = <DeferredFenceShell language={languageToken} source={source} />;
+  if (!actions) return shell;
+  return (
+    <div className="relative isolate">
+      {shell}
+      <CodeBlockActions
+        disabled={Boolean(isIncomplete)}
+        language={language}
+        source={source}
+      />
+    </div>
   );
 }
 
@@ -1386,6 +1436,7 @@ function MarkdownTextRenderer({
   const remoteId = useAuiState(({ threadListItem }) => threadListItem.remoteId);
   const activeThreadId = useChatRuntimeStore((state) => state.activeThreadId);
   const projectId = useChatProjectScope();
+  const highlightCode = useContext(CodeHighlightEnabledContext);
   const threadId = remoteId ?? activeThreadId ?? undefined;
   // Streamdown's memo comparator ignores rehypePlugins.
   const sandboxScopeKey = JSON.stringify([threadId, projectId]);
@@ -1473,7 +1524,9 @@ function MarkdownTextRenderer({
             }
             isAnimating={isStreaming}
             animated={STREAMDOWN_IMMEDIATE_UPDATES}
-            plugins={STREAMDOWN_PLUGINS}
+            plugins={
+              highlightCode ? STREAMDOWN_PLUGINS : STREAMDOWN_PLAIN_CODE_PLUGINS
+            }
             components={STREAMDOWN_COMPONENTS}
             allowedTags={STREAMDOWN_ALLOWED_TAGS}
             rehypePlugins={rehypePlugins}

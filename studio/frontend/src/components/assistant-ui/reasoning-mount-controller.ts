@@ -132,7 +132,7 @@ export type ChunkGrid = {
 
 type GridFragment = Pick<ReasoningFragment, "key" | "text" | "code" | "document" | "start">;
 
-export const groupKeyOf = (fragment: GridFragment): string =>
+const groupKeyOf = (fragment: GridFragment): string =>
   fragment.code ? `${fragment.document}:${fragment.start}` : fragment.key;
 
 type PlacedFragment = Pick<ReasoningFragment, "text" | "code" | "document" | "start" | "end">;
