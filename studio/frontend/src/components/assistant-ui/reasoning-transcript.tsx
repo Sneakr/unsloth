@@ -511,7 +511,7 @@ export function ReasoningTranscript({
       initialAnchor && resolveReasoningAnchor(fragments, initialAnchor);
     return anchor && anchor.index >= 0 ? anchor : null;
   });
-  const origin = fragments[0]?.key ?? "";
+  const origin = `${index.generation}:${fragments[0]?.key ?? ""}`;
   const originRef = useRef(origin);
   const [mount, setMount] = useState(() => {
     const rows = chunkEndAt(

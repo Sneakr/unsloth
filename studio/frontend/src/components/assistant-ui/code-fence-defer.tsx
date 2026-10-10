@@ -290,7 +290,27 @@ const unwatchScrolling = (): void => {
   document.removeEventListener("scroll", onScroll, { capture: true });
 };
 
-// Printing reveals every fence; pending highlighting remains bounded.
+/*
+ * PRINT, the one gesture that puts every deferred fence on the page at once.
+ * Colour is all deferral costs a printed page, since the shell holds a live text node, but a page
+ * that lost the colour on fences the reader never scrolled past is a defect they keep. Nor does the
+ * printed window match the reader's: a print lays out at PAPER width while the scroll offset
+ * carries across as raw pixels, so the page lands several fences away (matching paper to window
+ * removes the difference, which is why chasing the window is the wrong fix). The whole document is
+ * on the page, so every fence is revealed; pending highlighting is bounded by PRINT_TOKENIZE_CHARS
+ * and fences beyond that budget or still waiting for a grammar remain plain text.
+ * An earlier attempt latched every fence from `beforeprint` with `flushSync` and 53 of 56 still
+ * printed on streamdown's raw fallback, because the swap alone renders UNHIGHLIGHTED while the
+ * passive effect waits on a grammar. `latchNow` closes both halves and `warmGrammars` keeps a
+ * loading grammar from being what is missing at snapshot.
+ * BOTH DOORS: `beforeprint` covers Ctrl+P and the print menu; headless `page.pdf()` and DevTools
+ * print emulation change the media query without firing it.
+ * A PRINT UPGRADES THE DOCUMENT THAT WAS PRINTED, AND NOTHING ELSE. This was a module-global
+ * `printed` folded into every future fence's `reached`, so one Ctrl+P turned the default off for
+ * the tab's life, including threads never on the printed page. So a print latches what is on the
+ * page WHEN IT HAPPENS and a fence mounted afterwards defers again. Still one way only: reverting
+ * on `afterprint` would be the bidirectional edge this design avoids.
+ */
 const upgradeEverythingForPrint = (): void => {
   latchNow([...unreached]);
 };

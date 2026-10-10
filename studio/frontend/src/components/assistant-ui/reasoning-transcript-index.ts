@@ -515,6 +515,7 @@ function fragmentsOf(
 
 /** Stored Markdown documents never share fence or paragraph state. */
 export class ReasoningTranscriptIndex {
+  generation = 0;
   private documents: DocumentIndex[] = [];
   private fragments = new WeakMap<
     Block,
@@ -527,10 +528,13 @@ export class ReasoningTranscriptIndex {
   >();
 
   update(sources: readonly string[]): ReasoningFragment[] {
+    if (sources.length < this.documents.length) this.generation += 1;
     this.documents.length = sources.length;
     return sources.flatMap((source, document) => {
       const index = (this.documents[document] ??= new DocumentIndex());
+      const generation = index.generation;
       index.update(source);
+      if (index.generation !== generation) this.generation += 1;
       return index.blocks.flatMap((block) => {
         // Preview-capable fences retain the established renderer and its settings.
         // Ordinary code keeps the same incremental renderer and scroll geometry.

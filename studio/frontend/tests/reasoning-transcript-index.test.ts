@@ -42,6 +42,50 @@ test("long prose remains lossless and completed fragments keep their identity", 
   );
 });
 
+test("rewrites in any thinking segment advance the transcript generation", () => {
+  const index = new ReasoningTranscriptIndex();
+  const first = "Before the tool call.\n\n";
+  const second = "After the tool call.\n\n";
+  const before = index.update([first, second]);
+  const generation = index.generation;
+  const after = index.update([first, "Revised after the tool call.\n\n"]);
+  assert.equal(after[0], before[0]);
+  assert.notEqual(after[1].key, before[1].key);
+  assert.ok(index.generation > generation);
+
+  const restarted = index.generation;
+  index.update(["Revised before the tool call.\n\n", second]);
+  assert.ok(index.generation > restarted);
+});
+
+test("streamed appends and additional segments preserve the transcript generation", () => {
+  const index = new ReasoningTranscriptIndex();
+  index.update(["First thought.\n\n"]);
+  const generation = index.generation;
+  for (const sources of [
+    ["First thought.\n\n"],
+    ["First thought.\n\nMore thoughts."],
+    ["First thought.\n\nMore thoughts.", ""],
+    ["First thought.\n\nMore thoughts.", "After the tool call."],
+  ]) {
+    index.update(sources);
+    assert.equal(index.generation, generation);
+  }
+});
+
+test("removing and replacing a later segment cannot reuse its old transcript generation", () => {
+  const index = new ReasoningTranscriptIndex();
+  index.update(["First thought.", "Second thought."]);
+  const before = index.generation;
+  index.update(["First thought."]);
+  assert.ok(index.generation > before);
+  const removed = index.generation;
+  index.update(["First thought.", "Replacement thought."]);
+  assert.equal(index.generation, removed);
+  index.update(["First thought.", ""]);
+  assert.ok(index.generation > removed);
+});
+
 test("a giant fence does not swallow the surrounding prose", () => {
   const body = Array.from(
     { length: 5000 },
