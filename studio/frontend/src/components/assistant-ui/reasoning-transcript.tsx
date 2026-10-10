@@ -308,7 +308,7 @@ function CodeGroup({
         <CodeBlockActions
           disabled={streaming}
           language={code.language}
-          source={code.source}
+          source={() => code.source}
         />
       )}
       {first.first && (

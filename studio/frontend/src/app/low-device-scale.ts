@@ -48,13 +48,6 @@ export function watchLowDeviceScale(options: {
 
 export const THREAD_SCROLLBAR_GUTTER_PROPERTY = "--thread-scrollbar-gutter";
 
-type GutterRoot = {
-  style: {
-    setProperty: (name: string, value: string) => void;
-    removeProperty: (name: string) => string;
-  };
-};
-
 export function measureThinScrollbar(): number {
   const probe = document.createElement("div");
   probe.setAttribute("aria-hidden", "true");
@@ -72,16 +65,16 @@ export function measureThinScrollbar(): number {
 export function watchThreadScrollbarGutter(options: {
   source: PixelRatioSource;
   measure: () => number;
-  root: GutterRoot;
+  style: Pick<CSSStyleDeclaration, "setProperty" | "removeProperty">;
 }): () => void {
-  const { source, measure, root } = options;
+  const { source, measure, style } = options;
   const sync = () => {
-    root.style.setProperty(THREAD_SCROLLBAR_GUTTER_PROPERTY, `${measure()}px`);
+    style.setProperty(THREAD_SCROLLBAR_GUTTER_PROPERTY, `${measure()}px`);
   };
   sync();
   const stopRatio = observeDevicePixelRatio(source, sync);
   return () => {
     stopRatio();
-    root.style.removeProperty(THREAD_SCROLLBAR_GUTTER_PROPERTY);
+    style.removeProperty(THREAD_SCROLLBAR_GUTTER_PROPERTY);
   };
 }

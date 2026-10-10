@@ -18,6 +18,17 @@ type Draft = {
   };
 };
 
+const documentEvents = new EventTarget();
+Object.defineProperty(globalThis, "document", {
+  value: documentEvents,
+  configurable: true,
+  writable: true,
+});
+const teardown: (() => void)[] = [];
+test.afterEach(() => {
+  for (const cleanup of teardown.splice(0)) cleanup();
+});
+
 const FINGER = { pointerId: 1 };
 
 function mountDraft(value: number, onDraft?: (value: number | null) => void) {
@@ -26,6 +37,7 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
   const cleanups: (() => void)[] = [];
   let cursor = 0;
   let flushing = false;
+  let pendingOwned: number | null = null;
   const react = {
     useState: (initial: unknown) => {
       const at = cursor++;
@@ -43,17 +55,21 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
       if (!(at in slots)) slots[at] = { current: initial };
       return slots[at];
     },
-    useEffectEvent: (handler: () => void) => {
+    useEffectEvent: (handler: (event?: Event) => void) => {
       const at = cursor++;
-      if (!(at in slots)) slots[at] = { handler, call: () => (slots[at] as { handler: () => void }).handler() };
-      const event = slots[at] as { handler: () => void; call: () => void };
+      if (!(at in slots)) slots[at] = { handler, call: (event?: Event) => (slots[at] as { handler: (event?: Event) => void }).handler(event) };
+      const event = slots[at] as { handler: (event?: Event) => void; call: (event?: Event) => void };
       event.handler = handler;
       return event.call;
     },
-    useLayoutEffect: (effect: () => (() => void) | void) => {
+    useLayoutEffect: (effect: () => (() => void) | void, deps: unknown[]) => {
       const at = cursor++;
-      if (at in slots) return;
-      slots[at] = true;
+      const previous = slots[at] as unknown[] | undefined;
+      if (
+        previous &&
+        deps.every((value, index) => Object.is(value, previous[index]))
+      ) return;
+      slots[at] = deps;
       const cleanup = effect();
       if (cleanup) cleanups.push(cleanup);
     },
@@ -70,6 +86,11 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
       flushSync: (update: () => void) => {
         flushing = true;
         update();
+        if (pendingOwned !== null) {
+          owned = pendingOwned;
+          pendingOwned = null;
+        }
+        SliderRow();
         flushing = false;
       },
     },
@@ -81,12 +102,16 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
     return useSliderDraft(owned, (next) => commits.push(next), onDraft);
   };
   const unmount = () => {
-    for (const cleanup of cleanups) cleanup();
+    for (const cleanup of cleanups.splice(0)) cleanup();
   };
   const setOwned = (next: number) => {
     owned = next;
   };
-  return { render: SliderRow, commits, synced, unmount, setOwned };
+  teardown.push(unmount);
+  const queueOwned = (next: number) => {
+    pendingOwned = next;
+  };
+  return { render: SliderRow, commits, synced, unmount, setOwned, queueOwned };
 }
 
 test("a drag moves the thumb locally and hands its owner one settled value", () => {
@@ -260,4 +285,40 @@ test("a Run settings commit lands on the params the store holds when it is made"
     /function set<K extends keyof InferenceParams>\(key: K\) \{\s*return \(v: InferenceParams\[K\]\) => \{\s*const nextParams = \{\s*\.\.\.useChatRuntimeStore\.getState\(\)\.params,/,
     "a slider that unmounts in the commit that switched the model commits from its last render, and that render's params would switch the model back",
   );
+});
+
+test("a track click after a number input blur commits against the flushed owner", () => {
+  const held = mountDraft(0.5);
+  const stale = held.render().sliderProps;
+  stale.onPointerDown(FINGER);
+  held.queueOwned(0.9);
+  stale.onValueChange([0.3]);
+  stale.onLostPointerCapture(FINGER);
+  assert.deepEqual(held.commits, [0.3]);
+});
+
+test("a removed capture target releases its pointer through the document", () => {
+  const held = mountDraft(0.5);
+  held.render().sliderProps.onPointerDown(FINGER);
+  held.render().sliderProps.onValueChange([0.7]);
+  documentEvents.dispatchEvent(Object.assign(new Event("lostpointercapture"), FINGER));
+  assert.deepEqual(held.commits, [0.7]);
+  held.setOwned(0.7);
+  held.render().sliderProps.onValueCommit([0.8]);
+  assert.deepEqual(held.commits, [0.7, 0.8]);
+  held.unmount();
+  documentEvents.dispatchEvent(Object.assign(new Event("lostpointercapture"), FINGER));
+  assert.deepEqual(held.commits, [0.7, 0.8]);
+});
+
+test("a draft callback that unmounts the row still commits the latest move", () => {
+  let remove = () => {};
+  const held = mountDraft(0.5, (next) => {
+    if (next !== null) remove();
+  });
+  remove = held.unmount;
+  held.render().sliderProps.onPointerDown(FINGER);
+  held.render().sliderProps.onValueChange([0.8]);
+  assert.deepEqual(held.commits, [0.8]);
+  assert.equal(held.render().draft, null);
 });

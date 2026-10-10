@@ -40,7 +40,8 @@ test("a desktop zoom shows skipped content until WebKit has measured it at the n
 
 test("the Windows thread gutter follows the native thin bar, which neither browser nor desktop zoom scales", () => {
   const provider = readSrc("app/provider.tsx");
-  assert.match(provider, /root\.classList\.contains\("client-windows"\) &&\s*CSS\.supports\("selector\(::-webkit-scrollbar\)"\)\s*\? watchThreadScrollbarGutter\(\{\s*source,\s*measure: measureThinScrollbar,\s*root,\s*\}\)\s*: null;/, "measured where the thread's thin bar is in force, so a browser zoom in Unsloth Web is covered too");
+  assert.match(provider, /if \(!root\.classList\.contains\("client-windows"\)\) return;/);
+  assert.match(provider, /if \(CSS\.supports\("selector\(::-webkit-scrollbar\)"\)\) \{[\s\S]*?watchThreadScrollbarGutter\(\{\s*source,\s*measure: measureThinScrollbar,\s*style: rule\.style,\s*\}\)/, "the measurement updates a scoped stylesheet rule before paint");
   assert.equal(readSrc("index.css").includes("--studio-interface-zoom"), false);
   assert.equal(readSrc("features/settings/lib/interface-scale-runtime.ts").includes("--studio-interface-zoom"), false);
 });
@@ -55,7 +56,7 @@ test("below 1.5x device scale the Windows thread scrolls on the compositor and k
   const supports = css.lastIndexOf("@supports selector(::-webkit-scrollbar)", css.indexOf("[data-low-device-scale]"));
   assert.ok(supports > css.indexOf(".aui-thread-viewport {\n\t/* Reserve scrollbar space"), "the Chromium-only scrollbar block holds it, so Firefox keeps its own scrolling");
   const provider = readSrc("app/provider.tsx");
-  assert.match(provider, /const root = document\.documentElement;\s*const stopFlag = watchLowDeviceScale\(\{\s*source,\s*interfaceZoom: getAppliedInterfaceZoom,\s*subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,\s*root,\s*\}\);/, "the desktop divides its own page zoom out, since Chromium decides on the display's scale, not the zoomed ratio");
+  assert.match(provider, /const stopFlag = watchLowDeviceScale\(\{\s*source,\s*interfaceZoom: getAppliedInterfaceZoom,\s*subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,\s*root,\s*\}\);/, "the desktop divides its own page zoom out, since Chromium decides on the display's scale, not the zoomed ratio");
   assert.match(provider, /<AppearanceCustomizationEffect \/>\s*<LowDeviceScaleEffect \/>/);
 });
 
@@ -77,9 +78,10 @@ test("settled fences go to the worker where the main thread's regex engine is sl
   assert.match(plugin, /: \{ forgiving: true \},\s*\);/, "V8 matches the emulated ES2018 patterns about 7% slower, so Blink keeps the engine's own target");
 });
 
-test("find in page waits for the wheel to stop before rebuilding its index", () => {
+test("find in page defers rebuilds during scrolling with a maximum wait", () => {
   const find = readSrc("features/find-in-page/hooks/use-find-in-page.ts");
-  assert.match(find, /const flush = \(\) => \{\s*const wait = REINDEX_INTERVAL_MS - \(performance\.now\(\) - scrolledAt\);\s*if \(wait > 0\) \{\s*timerRef\.current = setTimeout\(flush, wait\);\s*return;\s*\}/);
+  assert.match(find, /reindexBy = performance\.now\(\) \+ 4 \* REINDEX_INTERVAL_MS;/);
+  assert.match(find, /const flush = \(\) => \{\s*const now = performance\.now\(\);\s*const wait = Math\.min\(\s*REINDEX_INTERVAL_MS - \(now - scrolledAt\),\s*reindexBy - now,\s*\);\s*if \(wait > 0\) \{\s*timerRef\.current = setTimeout\(flush, wait\);\s*return;\s*\}/);
   assert.match(find, /window\.addEventListener\("wheel", noteScroll, \{ capture: true, passive: true \}\);/);
   assert.match(find, /window\.removeEventListener\("wheel", noteScroll, \{ capture: true \}\);/);
   assert.equal(/addEventListener\("scroll", noteScroll/.test(find), false, "autoscroll's own scrolling must not starve a followed stream of rebuilds");

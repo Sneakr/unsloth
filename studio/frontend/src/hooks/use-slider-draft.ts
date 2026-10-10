@@ -12,6 +12,10 @@ export function useSliderDraft(
   const [draft, setDraft] = useState<number | null>(null);
   const pointers = useRef(new Set<number>());
   const dragged = useRef<{ value: number; base: number } | null>(null);
+  const owner = useRef(value);
+  useLayoutEffect(() => {
+    owner.current = value;
+  }, [value]);
   const show = (next: number | null) => {
     setDraft(next);
     onDraft?.(next);
@@ -21,13 +25,31 @@ export function useSliderDraft(
     pointers.current.clear();
     dragged.current = null;
     show(null);
-    if (drag !== null && drag.base === value && drag.value !== value)
+    if (
+      drag !== null &&
+      drag.base === owner.current &&
+      drag.value !== owner.current
+    )
       onCommit(drag.value);
+  };
+  const release = ({ pointerId }: { pointerId: number }) => {
+    if (!pointers.current.delete(pointerId)) return;
+    if (pointers.current.size === 0) end();
   };
   const endOnUnmount = useEffectEvent(() => {
     if (pointers.current.size > 0) end();
   });
-  useLayoutEffect(() => () => endOnUnmount(), []);
+  const releaseRemoved = useEffectEvent((event: PointerEvent) => {
+    if (event.target === document) release(event);
+  });
+  useLayoutEffect(() => {
+    const onLostCapture = (event: PointerEvent) => releaseRemoved(event);
+    document.addEventListener("lostpointercapture", onLostCapture);
+    return () => {
+      document.removeEventListener("lostpointercapture", onLostCapture);
+      endOnUnmount();
+    };
+  }, []);
   return {
     draft,
     sliderProps: {
@@ -37,16 +59,15 @@ export function useSliderDraft(
       },
       onValueChange: ([next]: number[]) => {
         if (pointers.current.size === 0) return;
-        dragged.current = { value: next, base: value };
+        const drag = { value: next, base: owner.current };
+        dragged.current = drag;
         flushSync(() => show(next));
+        drag.base = owner.current;
       },
       onValueCommit: ([next]: number[]) => {
         if (pointers.current.size === 0) onCommit(next);
       },
-      onLostPointerCapture: ({ pointerId }: { pointerId: number }) => {
-        pointers.current.delete(pointerId);
-        if (pointers.current.size === 0) end();
-      },
+      onLostPointerCapture: release,
     },
   };
 }

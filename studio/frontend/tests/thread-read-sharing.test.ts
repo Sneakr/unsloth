@@ -31,6 +31,10 @@ function harness() {
     new URL("../src/features/chat/api/chat-api.ts", import.meta.url),
     {
       "./skill-load-event": { skillLoadCardEvent },
+      "./thread-read-cache.ts": loadWithStubs(
+        new URL("../src/features/chat/api/thread-read-cache.ts", import.meta.url),
+        {},
+      ),
       "@/features/auth": {
         authFetch: (url: string, init?: RequestInit) =>
           new Promise((resolve, reject) => {

@@ -674,7 +674,7 @@ export function CodeBlockActions({
 }: {
   disabled: boolean;
   language: string | null;
-  source: string;
+  source: string | (() => string);
 }) {
   const { copied, showCopied } = useCopiedState();
 
@@ -687,7 +687,8 @@ export function CodeBlockActions({
           title="Copy code"
           disabled={disabled}
           onClick={async () => {
-            if (!(await copyToClipboard(source))) {
+            const text = typeof source === "function" ? source() : source;
+            if (!(await copyToClipboard(text))) {
               return;
             }
             showCopied();
@@ -705,7 +706,10 @@ export function CodeBlockActions({
           title="Download file"
           disabled={disabled}
           onClick={() => {
-            downloadTextFile(getCodeFilename(language), source);
+            downloadTextFile(
+              getCodeFilename(language),
+              typeof source === "function" ? source() : source,
+            );
           }}
         >
           <HugeiconsIcon icon={Download01Icon} className="size-icon" />

@@ -278,11 +278,16 @@ export function useFindInPage(
     });
 
     let scrolledAt = Number.NEGATIVE_INFINITY;
+    let reindexBy = Number.POSITIVE_INFINITY;
     const noteScroll = () => {
       scrolledAt = performance.now();
     };
     const flush = () => {
-      const wait = REINDEX_INTERVAL_MS - (performance.now() - scrolledAt);
+      const now = performance.now();
+      const wait = Math.min(
+        REINDEX_INTERVAL_MS - (now - scrolledAt),
+        reindexBy - now,
+      );
       if (wait > 0) {
         timerRef.current = setTimeout(flush, wait);
         return;
@@ -300,6 +305,7 @@ export function useFindInPage(
       if (queryRef.current.length === 0) return;
       // Already scheduled: the interval is the floor, so a burst costs one rebuild, not one each.
       if (timerRef.current !== null) return;
+      reindexBy = performance.now() + 4 * REINDEX_INTERVAL_MS;
       timerRef.current = setTimeout(flush, REINDEX_INTERVAL_MS);
     };
 

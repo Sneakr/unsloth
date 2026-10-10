@@ -72,7 +72,7 @@ function fakeWorld(initialRatio: number, initialZoom: number) {
   };
 }
 
-test("the device scale is the pixel ratio with the desktop's own page zoom divided out", () => {
+test("the device scale is the pixel ratio with WebView2's own page zoom divided out", () => {
   assert.equal(isLowDeviceScale(1, 1), true);
   assert.equal(isLowDeviceScale(1.25, 1), true);
   assert.equal(isLowDeviceScale(1.5, 1), false);
@@ -136,7 +136,7 @@ test("the thread gutter is the measured thin bar, measured again whenever the pi
     },
   };
   let thickness = 10;
-  const stop = watchThreadScrollbarGutter({ source: world.source, measure: () => thickness, root });
+  const stop = watchThreadScrollbarGutter({ source: world.source, measure: () => thickness, style: root.style });
   assert.equal(properties.get(THREAD_SCROLLBAR_GUTTER_PROPERTY), "10px");
 
   thickness = 8;

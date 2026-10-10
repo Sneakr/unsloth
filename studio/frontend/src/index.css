@@ -5236,8 +5236,10 @@ html.force-reduced-motion .sidebar-section-drop-line {
 }
 
 /* Chromium's thin scrollbar width; scrollbars ignore the UI scale. */
-:root {
-	--thread-scrollbar-gutter: 10px;
+@property --thread-scrollbar-gutter {
+	syntax: "<length>";
+	inherits: false;
+	initial-value: 10px;
 }
 
 /* Chat viewport: scrollbar styled with Run settings above, so no track to clip at the corner. */
@@ -5845,13 +5847,16 @@ html[data-find-bar-open] [data-sonner-toaster][data-y-position="top"] {
 	--studio-content-top-inset: 0px;
 	--studio-chat-header-height: 0px;
 	--studio-chat-notice-height: 0px;
-	--thread-scrollbar-gutter: 0px;
 	height: auto;
 	border-radius: 28px;
 	background-color: var(--dock-surface);
 	box-shadow:
 		0 0 0 1px color-mix(in oklab, var(--foreground) 8%, transparent),
 		0 12px 32px -8px rgb(0 0 0 / 0.22);
+}
+
+.chat-full-view-dock .aui-thread-composer-dock {
+	--thread-scrollbar-gutter: 0px;
 }
 
 .dark .chat-full-view-dock {

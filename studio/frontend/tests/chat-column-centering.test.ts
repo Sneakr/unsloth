@@ -51,7 +51,7 @@ test("nothing around the composer re-adds a one-sided inset", async () => {
 // Windows too, so there is one gutter width everywhere.
 test("the overlays around the thread stop at its real scrollbar gutter", async () => {
   const css = await readSrcAsync("index.css");
-  assert.ok(css.includes(":root {\n\t--thread-scrollbar-gutter: 10px;"));
+  assert.match(css, /@property --thread-scrollbar-gutter \{\s*syntax: "<length>";\s*inherits: false;\s*initial-value: 10px;/);
   assert.ok(!css.includes("--thread-scrollbar-gutter: 8px;"));
   assert.match(
     css,

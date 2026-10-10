@@ -1093,28 +1093,37 @@ function AppearanceCustomizationEffect() {
 }
 
 function LowDeviceScaleEffect() {
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (!root.classList.contains("client-windows")) return;
     const source = windowPixelRatioSource();
     if (!source) return;
-    const root = document.documentElement;
     const stopFlag = watchLowDeviceScale({
       source,
       interfaceZoom: getAppliedInterfaceZoom,
       subscribeInterfaceZoom: subscribeAppliedInterfaceZoom,
       root,
     });
-    const stopGutter =
-      root.classList.contains("client-windows") &&
-      CSS.supports("selector(::-webkit-scrollbar)")
-        ? watchThreadScrollbarGutter({
-            source,
-            measure: measureThinScrollbar,
-            root,
-          })
-        : null;
+    let gutterSheet: HTMLStyleElement | null = null;
+    let stopGutter: (() => void) | undefined;
+    if (CSS.supports("selector(::-webkit-scrollbar)")) {
+      gutterSheet = document.createElement("style");
+      gutterSheet.textContent =
+        ":is(.aui-thread-viewport, .aui-thread-composer-dock, .compare-pane-fade, [data-side-panel-inset]):not(.chat-full-view-dock *) {}";
+      document.head.append(gutterSheet);
+      const rule = gutterSheet.sheet?.cssRules[0] as CSSStyleRule | undefined;
+      if (rule) {
+        stopGutter = watchThreadScrollbarGutter({
+          source,
+          measure: measureThinScrollbar,
+          style: rule.style,
+        });
+      }
+    }
     return () => {
       stopFlag();
       stopGutter?.();
+      gutterSheet?.remove();
     };
   }, []);
   return null;

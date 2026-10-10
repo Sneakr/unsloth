@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import {
+  forgetThreadReads,
+  inFlightThreadReads,
+  type InFlightThreadRead,
+} from "./thread-read-cache.ts";
 import { skillLoadCardEvent } from "./skill-load-event";
 import { authFetch, getAuthSessionEpoch } from "@/features/auth";
 import { prepareHfTokenForUse } from "@/features/hf-auth";
@@ -181,23 +186,7 @@ export function subscribeChatHistoryUpdated(
   return () => window.removeEventListener(CHAT_HISTORY_UPDATED_EVENT, onEvent);
 }
 
-type InFlightThreadRead = {
-  promise: Promise<ThreadRecord | null>;
-  controller: AbortController;
-  readers: number;
-  startedAt: number;
-};
-
 const THREAD_READ_JOIN_MS = 2_000;
-const inFlightThreadReads = new Map<string, InFlightThreadRead>();
-
-function forgetThreadReads(threadIds: readonly string[] | null): void {
-  if (threadIds === null) {
-    inFlightThreadReads.clear();
-    return;
-  }
-  for (const threadId of threadIds) inFlightThreadReads.delete(threadId);
-}
 
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (event) => {
