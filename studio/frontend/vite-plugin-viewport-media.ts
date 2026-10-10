@@ -2,6 +2,8 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { posix } from "node:path";
+import postcss, { type AtRule, type Container, type Root, type Rule } from "postcss";
+import selectorParser, { type Node as SelectorNode, type Selector } from "postcss-selector-parser";
 import type { Plugin } from "vite";
 
 const VIEWPORT_FEATURE =
@@ -13,7 +15,7 @@ const GATED_AT_RULES = new Set([
   "container",
   "starting-style",
 ]);
-const PSEUDO_ELEMENT = /^:(?::|(?:before|after|first-line|first-letter)(?![\w-]))/i;
+const LEGACY_PSEUDO_ELEMENTS = new Set([":before", ":after", ":first-line", ":first-letter"]);
 const ATTRIBUTE_PREFIX = "data-mq-";
 const BOOT_SCRIPT_NAME = "viewport-media.js";
 
@@ -21,138 +23,35 @@ export type ViewportQuery = { attribute: string; query: string };
 
 type Gate = { attribute: string; present: boolean };
 
-function skipEscape(text: string, at: number): number {
-  let end = at + 1;
-  if (!/[0-9a-f]/i.test(text[end] ?? "")) return end + 1;
-  while (end < at + 7 && /[0-9a-f]/i.test(text[end] ?? "")) end++;
-  if (/\s/.test(text[end] ?? "")) end++;
-  return end;
+function isPseudoElement(node: SelectorNode): boolean {
+  return (
+    node.type === "pseudo" &&
+    (node.value.startsWith("::") || LEGACY_PSEUDO_ELEMENTS.has(node.value.toLowerCase()))
+  );
 }
 
-function skipString(text: string, at: number): number {
-  const quote = text[at];
-  let end = at + 1;
-  while (end < text.length && text[end] !== quote) {
-    end = text[end] === "\\" ? end + 2 : end + 1;
+function gateComplex(selector: Selector, root: string): string {
+  const nodes = [...selector.nodes];
+  while (nodes[0]?.type === "comment" || (nodes[0]?.type === "combinator" && !nodes[0].value.trim())) {
+    nodes.shift();
   }
-  return end + 1;
-}
-
-function skipComment(text: string, at: number): number {
-  const close = text.indexOf("*/", at + 2);
-  return close === -1 ? text.length : close + 2;
-}
-
-function preludeEnd(text: string, from: number, to: number): number {
-  let depth = 0;
-  for (let at = from; at < to; ) {
-    const char = text[at];
-    if (char === "\\") at = skipEscape(text, at);
-    else if (char === '"' || char === "'") at = skipString(text, at);
-    else if (char === "/" && text[at + 1] === "*") at = skipComment(text, at);
-    else {
-      if (char === "(" || char === "[") depth++;
-      else if (char === ")" || char === "]") depth--;
-      else if (depth === 0 && (char === "{" || char === ";" || char === "}")) return at;
-      at++;
-    }
-  }
-  return to;
-}
-
-function blockEnd(text: string, open: number): number {
-  let depth = 0;
-  for (let at = open; at < text.length; ) {
-    const char = text[at];
-    if (char === "\\") at = skipEscape(text, at);
-    else if (char === '"' || char === "'") at = skipString(text, at);
-    else if (char === "/" && text[at + 1] === "*") at = skipComment(text, at);
-    else {
-      if (char === "{") depth++;
-      else if (char === "}" && --depth === 0) return at;
-      at++;
-    }
-  }
-  return text.length;
-}
-
-function topLevelParts(selector: string): { commas: number[]; firstCombinator: number } {
-  const commas: number[] = [];
-  let firstCombinator = -1;
-  let depth = 0;
-  for (let at = 0; at < selector.length; ) {
-    const char = selector[at];
-    if (char === "\\") {
-      at = skipEscape(selector, at);
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      at = skipString(selector, at);
-      continue;
-    }
-    if (char === "/" && selector[at + 1] === "*") {
-      at = skipComment(selector, at);
-      continue;
-    }
-    if (char === "(" || char === "[") depth++;
-    else if (char === ")" || char === "]") depth--;
-    else if (depth === 0) {
-      if (char === ",") commas.push(at);
-      else if (
-        firstCombinator === -1 &&
-        (char === ">" || char === "+" || char === "~" || /\s/.test(char))
-      ) {
-        firstCombinator = at;
-      }
-    }
-    at++;
-  }
-  return { commas, firstCombinator };
-}
-
-function pseudoElementAt(selector: string, to: number): number {
-  let depth = 0;
-  for (let at = 0; at < to; ) {
-    const char = selector[at];
-    if (char === "\\") {
-      at = skipEscape(selector, at);
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      at = skipString(selector, at);
-      continue;
-    }
-    if (char === "/" && selector[at + 1] === "*") {
-      at = skipComment(selector, at);
-      continue;
-    }
-    if (char === "(" || char === "[") depth++;
-    else if (char === ")" || char === "]") depth--;
-    else if (depth === 0 && char === ":" && PSEUDO_ELEMENT.test(selector.slice(at))) return at;
-    at++;
-  }
-  return -1;
-}
-
-function splitSelectorList(list: string): string[] {
-  const { commas } = topLevelParts(list);
-  const parts: string[] = [];
-  let start = 0;
-  for (const comma of commas) {
-    parts.push(list.slice(start, comma));
-    start = comma + 1;
-  }
-  parts.push(list.slice(start));
-  return parts;
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  if (!first || !last) throw new Error(`empty selector in "${String(selector)}"`);
+  first.spaces.before = "";
+  last.spaces.after = "";
+  const cut = nodes.findIndex((node) => node.type === "combinator" || isPseudoElement(node));
+  const left = nodes.slice(0, cut === -1 ? nodes.length : cut).join("");
+  const right = cut === -1 ? "" : nodes.slice(cut).join("");
+  return `:where(${root}) ${left}${right},${left}:where(${root})${right}`;
 }
 
 export function gateSelector(selector: string, root: string): string {
-  const trimmed = selector.replace(/^(?:\s|\/\*[\s\S]*?\*\/)*/, "").trimEnd();
-  const { firstCombinator } = topLevelParts(trimmed);
-  const leftmostEnd = firstCombinator === -1 ? trimmed.length : firstCombinator;
-  const pseudo = pseudoElementAt(trimmed, leftmostEnd);
-  const at = pseudo === -1 ? leftmostEnd : pseudo;
-  return `:where(${root}) ${trimmed},${trimmed.slice(0, at)}:where(${root})${trimmed.slice(at)}`;
+  const list = selectorParser().astSync(selector, { lossless: true }).nodes;
+  if (list.map(String).join(",") !== selector) {
+    throw new Error(`selector list "${selector}" does not round-trip`);
+  }
+  return list.map((complex) => gateComplex(complex, root)).join(",");
 }
 
 function gateRoot(gates: readonly Gate[]): string {
@@ -182,85 +81,72 @@ export function viewportGate(condition: string): { query: string; present: boole
   return /^\([^()]*\)$/.test(trimmed) ? { query: trimmed, present: true } : null;
 }
 
-function gatesEverything(text: string, from: number, to: number): boolean {
-  for (let at = from; at < to; ) {
-    const char = text[at];
-    if (char === "\\") at = skipEscape(text, at);
-    else if (char === '"' || char === "'") at = skipString(text, at);
-    else if (char === "/" && text[at + 1] === "*") at = skipComment(text, at);
-    else if (char === "@") {
-      const name = /^@([-\w]+)/.exec(text.slice(at, at + 40))?.[1]?.toLowerCase() ?? "";
-      if (!GATED_AT_RULES.has(name)) return false;
-      at++;
-    } else at++;
-  }
-  return true;
+function gatesEverything(block: AtRule): boolean {
+  let gated = true;
+  block.walkAtRules((rule) => {
+    if (GATED_AT_RULES.has(rule.name.toLowerCase())) return;
+    gated = false;
+    return false;
+  });
+  return gated;
 }
 
-function rewriteRules(
-  text: string,
-  from: number,
-  to: number,
-  gates: readonly Gate[],
-  queries: Map<string, string>,
-): string {
-  let out = "";
-  let at = from;
-  while (at < to) {
-    if (/\s/.test(text[at])) {
-      out += text[at++];
+function gateRule(rule: Rule, root: string): void {
+  rule.selector = gateSelector(rule.raws.selector?.raw ?? rule.selector, root);
+  delete rule.raws.selector;
+}
+
+function printCopy(block: AtRule): AtRule {
+  return postcss.atRule({
+    name: "media",
+    params: "print",
+    raws: { before: "", afterName: " ", between: "", after: "" },
+    nodes: [block.clone({ raws: { ...block.raws, before: "" } })],
+  });
+}
+
+function rewrite(container: Container, gates: readonly Gate[], queries: Map<string, string>): void {
+  for (const node of [...(container.nodes ?? [])]) {
+    if (node.type === "rule") {
+      if (gates.length > 0) gateRule(node, gateRoot(gates));
       continue;
     }
-    if (text[at] === "/" && text[at + 1] === "*") {
-      const end = skipComment(text, at);
-      out += text.slice(at, end);
-      at = end;
+    if (node.type !== "atrule" || !node.nodes) continue;
+    const name = node.name.toLowerCase();
+    const gate = name === "media" ? viewportGate(node.params) : null;
+    if (!gate || !gatesEverything(node)) {
+      if (GATED_AT_RULES.has(name)) rewrite(node, gates, queries);
       continue;
     }
-    const stop = preludeEnd(text, at, to);
-    if (stop >= to || text[stop] !== "{") {
-      const end = Math.min(stop + 1, to);
-      out += text.slice(at, end);
-      at = end;
+    const found = gates.length === 0 ? new Map(queries) : queries;
+    const attribute = found.get(gate.query) ?? attributeFor(gate.query);
+    found.set(gate.query, attribute);
+    const screen = node.clone({ params: "screen", raws: { ...node.raws, params: undefined } });
+    if (gates.length > 0) {
+      rewrite(screen, [...gates, { attribute, present: gate.present }], found);
+      node.replaceWith(screen);
       continue;
     }
-    const prelude = text.slice(at, stop);
-    const close = blockEnd(text, stop);
-    if (prelude.startsWith("@")) {
-      const name = /^@([-\w]+)/.exec(prelude)?.[1]?.toLowerCase() ?? "";
-      const gate = name === "media" ? viewportGate(prelude.slice(6)) : null;
-      if (gate && gatesEverything(text, stop + 1, close)) {
-        const attribute = queries.get(gate.query) ?? attributeFor(gate.query);
-        queries.set(gate.query, attribute);
-        const inner = rewriteRules(text, stop + 1, close, [...gates, { attribute, present: gate.present }], queries);
-        out += `@media screen{${inner}}`;
-        if (gates.length === 0) out += `@media print{${text.slice(at, close + 1)}}`;
-      } else if (GATED_AT_RULES.has(name)) {
-        out += `${prelude}{${rewriteRules(text, stop + 1, close, gates, queries)}}`;
-      } else {
-        out += text.slice(at, close + 1);
-      }
-    } else if (gates.length === 0) {
-      out += text.slice(at, close + 1);
-    } else {
-      const root = gateRoot(gates);
-      out += splitSelectorList(prelude)
-        .map((selector) => gateSelector(selector, root))
-        .join(",");
-      out += text.slice(stop, close + 1);
+    try {
+      rewrite(screen, [{ attribute, present: gate.present }], found);
+    } catch {
+      continue;
     }
-    at = close + 1;
+    found.forEach((value, query) => queries.set(query, value));
+    node.replaceWith(screen, printCopy(node));
   }
-  return out;
+}
+
+function gateStylesheet(css: string, from?: string): { root: Root; queries: ViewportQuery[] } {
+  const queries = new Map<string, string>();
+  const root = postcss.parse(css, { from });
+  rewrite(root, [], queries);
+  return { root, queries: [...queries].map(([query, attribute]) => ({ attribute, query })) };
 }
 
 export function gateViewportMedia(css: string): { css: string; queries: ViewportQuery[] } {
-  const queries = new Map<string, string>();
-  const next = rewriteRules(css, 0, css.length, [], queries);
-  return {
-    css: queries.size === 0 ? css : next,
-    queries: [...queries].map(([query, attribute]) => ({ attribute, query })),
-  };
+  const { root, queries } = gateStylesheet(css);
+  return { css: queries.length === 0 ? css : root.toString(), queries };
 }
 
 export function viewportBootScript(queries: readonly ViewportQuery[]): string {
@@ -271,17 +157,29 @@ export function viewportBootScript(queries: readonly ViewportQuery[]): string {
 export function viewportMediaGate(): Plugin[] {
   const queries = new Map<string, ViewportQuery>();
   let base = "/";
+  let sourcemap = false;
   return [
     {
       name: "viewport-media-gate",
       apply: "build",
+      configResolved(config) {
+        sourcemap = Boolean(config.build.sourcemap);
+      },
       transform: {
         filter: { id: { include: /\.css(?:$|\?)/, exclude: /[?&](?:inline|raw|url)\b/ }, code: "@media" },
-        handler(code) {
-          const gated = gateViewportMedia(code);
+        handler(code, id) {
+          let gated: { root: Root; queries: ViewportQuery[] };
+          try {
+            gated = gateStylesheet(code, id);
+          } catch (error) {
+            this.warn(`left ${id} ungated: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+          }
           if (gated.queries.length === 0) return null;
           for (const query of gated.queries) queries.set(query.query, query);
-          return { code: gated.css, map: null };
+          if (!sourcemap) return { code: gated.root.toString(), map: null };
+          const result = gated.root.toResult({ to: id, map: { inline: false, annotation: false, sourcesContent: true } });
+          return { code: result.css, map: result.map.toString() };
         },
       },
     },

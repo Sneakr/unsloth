@@ -133,6 +133,42 @@ test("what a selector gate cannot express is left as it was", () => {
   }
 });
 
+test("a block with a selector list the parser cannot rebuild stays native, and its neighbours are still gated", () => {
+  for (const invalid of [".b,/* x */", ".b,", ".a, ,.b", ",.a"]) {
+    const native = `@media (min-width:64rem){.c{order:1}${invalid}{order:2}}`;
+    const { css, queries } = gateViewportMedia(`@media (min-width:40rem){.a{order:1}}${native}`);
+    assert.ok(css.endsWith(`@media print{@media (min-width:40rem){.a{order:1}}}${native}`), css);
+    assert.deepEqual(queries, [{ attribute: SM, query: "(min-width:40rem)" }]);
+  }
+});
+
+test("a stylesheet that cannot be parsed is left ungated with a warning, never a failed build", () => {
+  const [gate] = viewportMediaGate();
+  const warnings: string[] = [];
+  const hook = gate.transform as {
+    handler: (this: { warn: (message: string) => void }, code: string, id: string) => unknown;
+  };
+  assert.equal(
+    hook.handler.call({ warn: (message) => warnings.push(message) }, "@media (min-width:40rem){.a{order:1}", "/app/broken.css"),
+    null,
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /\/app\/broken\.css.*Unclosed block/);
+});
+
+test("with build sourcemaps on, the rewrite returns its own map", () => {
+  const [gate] = viewportMediaGate();
+  (gate.configResolved as (config: { build: { sourcemap: boolean } }) => void)({ build: { sourcemap: true } });
+  const hook = gate.transform as {
+    handler: (this: unknown, code: string, id: string) => { code: string; map: string };
+  };
+  const result = hook.handler.call({}, "@media (min-width:40rem){.a{order:1}}", "/app/src/index.css");
+  const map: { sources: string[]; mappings: string } = JSON.parse(result.map);
+  assert.ok(result.code.startsWith("@media screen{"));
+  assert.ok(map.sources.includes("index.css"));
+  assert.notEqual(map.mappings, "");
+});
+
 test("the boot script mirrors each query onto <html> and follows its changes", () => {
   const attributes = new Map<string, boolean>();
   const lists = new Map<string, { matches: boolean; listeners: (() => void)[] }>();
