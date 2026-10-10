@@ -701,7 +701,7 @@ def test_expanded_titlebar_button_and_corner_match_sidebar_edge():
     assert re.search(r'pinned &&\s*"rounded-tl-\[12px\] border-l"', decoration)
     assert re.search(
         r'className="absolute top-\[12px\] '
-        r'h-\[calc\(100dvh-var\(--studio-custom-titlebar-height\)-12px\)\] '
+        r"h-\[calc\(100dvh-var\(--studio-custom-titlebar-height\)-12px\)\] "
         r'w-0 border-l border-sidebar-edge dark:border-transparent"\s*'
         r"style=\{\{ left: cornerLeft \}\}",
         decoration,

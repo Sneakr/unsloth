@@ -1360,7 +1360,8 @@ def test_an_mlx_target_is_offered_a_context_length_not_a_sequence_length():
     assert "const final = commitDraft(draftRef.current);\n          dirtyRef" in numeric
     assert "value={maxSeqLengthValue}\n              max={maxSeqLengthMax}" in page
     assert re.search(
-        r"useSliderDraft\(\n(?:\s*//[^\n]*\n)*\s*Math\.min\(Math\.max\(value, MAX_SEQ_LENGTH_MIN\), max\),", page
+        r"useSliderDraft\(\n(?:\s*//[^\n]*\n)*\s*Math\.min\(Math\.max\(value, MAX_SEQ_LENGTH_MIN\), max\),",
+        page,
     )
     assert "const final = shown ? parsed : snapToStep(parsed, step, min, max);" in numeric
     assert re.search(
