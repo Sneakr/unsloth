@@ -7610,7 +7610,11 @@ function useContinuation() {
   const thoughtSignature = useAuiState(({ message }) =>
     readTextThoughtSignature(message.content),
   );
-  const messageContent = useAuiState(({ message }) => message.content);
+  const messageContent = useAuiState(({ message }) =>
+    "status" in message && message.status?.type === "running"
+      ? undefined
+      : message.content,
+  );
   const thoughtParts = useMemo(
     () => collectGeminiThoughtReplayParts(messageContent),
     [messageContent],

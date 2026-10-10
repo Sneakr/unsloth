@@ -585,6 +585,7 @@ function ModelSelectorContent({
     <PopoverContent
       align="start"
       alignOffset={10}
+      dropdownGlow="picker"
       // Read by the model list, which sets its right inset against the panel's own.
       data-external={hasExternal || undefined}
       aria-label={

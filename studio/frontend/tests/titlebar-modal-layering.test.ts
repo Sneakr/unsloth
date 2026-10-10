@@ -128,7 +128,7 @@ test("the titlebar dims for viewport backdrops without a :has() on the document 
     readSrc("features/tour/components/guided-tour.tsx"),
   ]);
 
-  assert.doesNotMatch(styles, DOCUMENT_ROOT_HAS_PATTERN);
+  assert.doesNotMatch(styles.replace(/\/\*[\s\S]*?\*\//g, ""), DOCUMENT_ROOT_HAS_PATTERN);
   assert.match(styles, TITLEBAR_BACKDROP_RULE_PATTERN);
   assert.match(titlebar, TITLEBAR_BACKDROP_STORE_PATTERN);
   assert.match(titlebar, TITLEBAR_BACKDROP_ATTRIBUTE_PATTERN);

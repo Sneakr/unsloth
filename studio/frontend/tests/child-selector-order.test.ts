@@ -168,7 +168,7 @@ function complexSelectors(css: string): string[] {
 
 function parse(selector: string): Complex {
   const tokens = topLevel(
-    selector.replace(/\s*([>+~])\s*/g, "$1").trim(),
+    selector.replace(/\s+/g, " ").replace(/\s*([>+~])\s*/g, "$1").trim(),
     (char) => char === ">" || char === "+" || char === "~" || char === " ",
   );
   return {
@@ -188,6 +188,45 @@ function testsParentFirst(compound: string): boolean {
   return /^:(?:where|is)\([^()]*>\s*\*\)/.test(compound);
 }
 
+function functionalArguments(compound: string): string[] {
+  const found: string[] = [];
+  const opener = /:(?:is|where|not|has)\(/g;
+  let match: RegExpExecArray | null;
+  while ((match = opener.exec(compound))) {
+    let depth = 1;
+    let i = match.index + match[0].length;
+    const start = i;
+    for (; i < compound.length && depth > 0; i++) {
+      if (compound[i] === "\\") {
+        i++;
+        continue;
+      }
+      if (compound[i] === "(") depth++;
+      if (compound[i] === ")") depth--;
+    }
+    found.push(
+      ...topLevel(compound.slice(start, i - 1), (char) => char === ",")
+        .filter((part) => part !== ",")
+        .map((part) => part.trim())
+        .filter(Boolean),
+    );
+    opener.lastIndex = i;
+  }
+  return found;
+}
+
+function siblingOnUnnamedElement(selector: string): boolean {
+  const { compounds, combinators } = parse(selector.replace(/^\s*[>+~]\s*/, ""));
+  for (let i = 0; i < combinators.length; i++) {
+    if (/[+~]/.test(combinators[i]) && !hasFeature(compounds[i + 1])) return true;
+  }
+  return compounds.some(
+    (compound) =>
+      !testsParentFirst(compound) &&
+      functionalArguments(compound).some(siblingOnUnnamedElement),
+  );
+}
+
 test("index.css never makes Chromium check a sibling or a child position on every element", () => {
   const offenders: string[] = [];
   for (const selector of complexSelectors(readSrc("index.css"))) {
@@ -205,6 +244,33 @@ test("index.css never makes Chromium check a sibling or a child position on ever
     [],
     "with KaTeX's MathML on the page, Chromium's universal sibling set invalidates whole subtrees: one flagged parent turned every middle insert or remove into a restyle of everything below it, <body> included",
   );
+});
+
+test("no rule tries a sibling combinator on an element it cannot name, in any position", () => {
+  for (const flagged of [
+    ".dark\n\t\tbody\n\t\t> :is([data-slot=\"dialog-content\"])[data-state=\"open\"]\n\t\t~ *\n\t\t:is([data-slot=\"select-content\"], .dropdown-surface)",
+    ".dark body > [data-radix-popper-content-wrapper]:has(> .menu[data-state=\"open\"]) ~ * :is([data-slot=\"popover-content\"])",
+    ".dark :is(body > .dialog[data-state=\"open\"] ~ *, body > .picker ~ *) :is([data-slot=\"popover-content\"]):not(.a)",
+    ".a + *",
+    ":where(.a ~ *)",
+  ]) {
+    assert.ok(siblingOnUnnamedElement(flagged), flagged);
+  }
+  for (const allowed of [
+    ".aui-branch-chevron-btn + .aui-branch-picker-state",
+    ":where(.aui-assistant-message-content > *):where(.h-0 + *)",
+    ".dark [data-dropdown-glow]:not(.sidebar-menu, .browser-menu)",
+    ".a:has(> .b + .c)",
+  ]) {
+    assert.ok(!siblingOnUnnamedElement(allowed), allowed);
+  }
+  for (const file of ["index.css", "features/hub/hub.css"]) {
+    assert.deepEqual(
+      complexSelectors(readSrc(file)).filter(siblingOnUnnamedElement),
+      [],
+      `${file}: a sibling combinator whose right side names nothing is tried on every ancestor of the subject, so the parents of <body>'s children get flagged and, with KaTeX's MathML on the page, every insert at the start of <body> (Radix focus guards, toasts) restyles the whole page`,
+    );
+  }
 });
 
 test("the message spacing, the badge follower and the branch count keep their rules in the parent-first form", () => {
