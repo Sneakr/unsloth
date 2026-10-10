@@ -867,7 +867,7 @@ export function ChatSettingsPanel({
   function set<K extends keyof InferenceParams>(key: K) {
     return (v: InferenceParams[K]) => {
       const nextParams = {
-        ...params,
+        ...useChatRuntimeStore.getState().params,
         [key]: v,
         ...(key === "minP" ? { minPMode: "custom" as const } : {}),
       };

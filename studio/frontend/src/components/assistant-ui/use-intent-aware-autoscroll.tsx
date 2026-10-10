@@ -668,6 +668,10 @@ export function useIntentAwareAutoScroll(): {
       };
 
       const onMutation = (): void => {
+        if (el.ownerDocument.hidden) {
+          onLayoutChange();
+          return;
+        }
         layoutChanged = true;
         if (!parkIfHeld()) {
           extendFollow();

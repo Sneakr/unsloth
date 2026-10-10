@@ -930,7 +930,6 @@ const SingleContent = memo(function SingleContent({
             const release = () => {
               window.removeEventListener("pointerup", release);
               window.removeEventListener("pointercancel", release);
-              window.removeEventListener("blur", release);
               window.removeEventListener("pointermove", released);
               releaseDragOverlay();
               unpin();
@@ -941,7 +940,6 @@ const SingleContent = memo(function SingleContent({
             };
             window.addEventListener("pointerup", release);
             window.addEventListener("pointercancel", release);
-            window.addEventListener("blur", release);
             window.addEventListener("pointermove", released);
           }}
           onKeyUp={rememberArtifactPanelWidth}

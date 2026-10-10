@@ -66,6 +66,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   Block,
   type BlockProps,
@@ -79,6 +80,7 @@ import {
   type FenceTokens,
   fenceMode,
   noteStreamingFence,
+  PlainFenceShell,
   trimmedLength,
   trimTrailingNewlines,
   useFenceReached,
@@ -182,9 +184,6 @@ const STREAMDOWN_ICONS = {
 } satisfies NonNullable<StreamdownProps["icons"]>;
 const { withSmoothContextProvider } = INTERNAL;
 
-// Streamdown 2.5 schedules ordinary streaming blocks in an interruptible React transition, and a continuous token
-// stream can starve that transition for seconds. Its animated path commits every block update directly.
-// StreamdownBlock removes the animation transformer while retaining this direct scheduling path.
 const STREAMING_RENDER_DUTY = 3;
 const STREAMING_INPUT_YIELDS = 3;
 
@@ -205,6 +204,18 @@ const inputPending = (): boolean => {
   return discreteInput.pending();
 };
 
+const afterFrame = (callback: () => void): void => {
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    channel.port1.close();
+    callback();
+  };
+  channel.port2.postMessage(null);
+};
+
+// Streamdown 2.5 schedules ordinary streaming blocks in an interruptible React transition, and a continuous token
+// stream can starve that transition for seconds. Its animated path commits every block update directly.
+// StreamdownBlock removes the animation transformer while retaining this direct scheduling path.
 const STREAMDOWN_IMMEDIATE_UPDATES = {
   duration: 0,
   stagger: 0,
@@ -954,14 +965,12 @@ const settlesOffThread = (
   streaming: boolean,
   options: ReturnType<typeof fenceHighlightOptions>,
 ): boolean => {
-  if (tokenizesOffThread(body, streaming)) return true;
-  if (streaming || !slowMainThreadRegex) return false;
-  const state = highlightWorkerState();
-  return (
-    state !== "unavailable"
-    && state !== "stalled"
-    && code.cover(options).uncovered > MAIN_THREAD_TAIL_CHARS
-  );
+  if (!tokenizesOffThread(body, streaming)) {
+    if (streaming || !slowMainThreadRegex) return false;
+    const state = highlightWorkerState();
+    if (state === "unavailable" || state === "stalled") return false;
+  }
+  return code.cover(options).uncovered > MAIN_THREAD_TAIL_CHARS;
 };
 
 export const highlightFenceSource = (
@@ -1126,7 +1135,7 @@ function PlainFenceBlock({
   source: string;
 }) {
   const languageToken = language?.trim().split(/\s+/)[0] || null;
-  const shell = <DeferredFenceShell language={languageToken} source={source} />;
+  const shell = <PlainFenceShell language={languageToken} source={source} />;
   if (!actions) return shell;
   return (
     <div className="relative isolate">
@@ -1322,7 +1331,6 @@ function useCoalescedStreamingText(
   const renderedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const frameAtRef = useRef(Number.NEGATIVE_INFINITY);
   const frameIntervalRef = useRef(Number.POSITIVE_INFINITY);
-  const measureFromRef = useRef<number | null>(null);
   const costRef = useRef(0);
   const yieldsRef = useRef(0);
   const activeMessageIdRef = useRef(messageId);
@@ -1333,13 +1341,6 @@ function useCoalescedStreamingText(
       rafRef.current = null;
     }
   }, []);
-
-  useLayoutEffect(() => {
-    const from = measureFromRef.current;
-    if (from === null) return;
-    measureFromRef.current = null;
-    costRef.current = performance.now() - from;
-  }, [displayed]);
 
   useEffect(() => {
     pendingRef.current = { messageId, text };
@@ -1382,8 +1383,11 @@ function useCoalescedStreamingText(
       }
       yieldsRef.current = 0;
       renderedAtRef.current = frameTime;
-      measureFromRef.current = performance.now();
-      setDisplayed(pendingRef.current);
+      afterFrame(() => {
+        const startedAt = performance.now();
+        flushSync(() => setDisplayed(pendingRef.current));
+        costRef.current = performance.now() - startedAt;
+      });
     };
     rafRef.current = requestAnimationFrame(render);
   }, [cancelScheduledRender, messageId, text, isStreaming]);

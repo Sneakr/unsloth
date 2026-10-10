@@ -42,6 +42,7 @@ test("the thread root is no longer a size container, so a width change restyles 
   const root = thread.slice(open, thread.indexOf(">", thread.indexOf("className=", open)));
   assert.match(root, /ref=\{watchWidthSteps\}/);
   assert.equal(root.includes("@container"), false);
+  assert.ok(root.includes("[contain:style]"), "the style containment the size container carried scopes KaTeX's equation counter; without it each numbered equation counts on from the ones in earlier messages");
   assert.match(thread, /const watchWidthSteps = useCallback\(\s*\(root: HTMLDivElement \| null\) =>\s*root \? observeThreadWidthSteps\(root\) : undefined,\s*\[\],\s*\);/);
   const css = readSrc("index.css");
   assert.equal(/@container \((max|min)-width: (31\.5|18\.75)rem\)/.test(css), false);

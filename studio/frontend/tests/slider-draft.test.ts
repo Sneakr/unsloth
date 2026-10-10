@@ -219,3 +219,11 @@ test("a sampling change re-renders the Run settings panel, not the chat page", (
   }
   assert.match(readSrc("features/chat/chat-settings-sheet.tsx"), /const params = useChatRuntimeStore\(\(s\) => s\.params\);/);
 });
+
+test("a Run settings commit lands on the params the store holds when it is made", () => {
+  assert.match(
+    readSrc("features/chat/chat-settings-sheet.tsx"),
+    /function set<K extends keyof InferenceParams>\(key: K\) \{\s*return \(v: InferenceParams\[K\]\) => \{\s*const nextParams = \{\s*\.\.\.useChatRuntimeStore\.getState\(\)\.params,/,
+    "a slider that unmounts in the commit that switched the model commits from its last render, and that render's params would switch the model back",
+  );
+});

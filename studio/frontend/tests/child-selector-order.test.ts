@@ -26,8 +26,8 @@ test("Tailwind's spacing and divide utilities are rewritten to test the parent f
     "divide-y",
     "divide-border",
     "divide-border/50",
-    "hover:space-y-1",
-    "group-hover:space-y-2",
+    // Composed, so Tailwind's source scan does not ship these variants in the app's stylesheet.
+    ...["hover", "group-hover"].map((variant) => `${variant}:space-y-4`),
   ]);
   assert.match(
     generated,
@@ -61,8 +61,8 @@ test("the rewrite keeps the match and the zero specificity, in every form Tailwi
       ":where(.divide-border > *):where(:not(:last-child)),:where(.divide-border\\/50 > *):where(:not(:last-child)){",
     ],
     [
-      ":where(.divide-foreground\\/\\[0\\.06\\]>:not(:last-child)){",
-      ":where(.divide-foreground\\/\\[0\\.06\\] > *):where(:not(:last-child)){",
+      ":where(.divide-border\\/\\[0\\.06\\]>:not(:last-child)){",
+      ":where(.divide-border\\/\\[0\\.06\\] > *):where(:not(:last-child)){",
     ],
     [
       ":where(.group-hover\\:space-y-2:is(:where(.group):hover *)>:not(:last-child)){",

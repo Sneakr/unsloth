@@ -20,7 +20,6 @@ import {
   SearchImagesEnabledContext,
 } from "./markdown-text";
 import { CodeHighlightEnabledContext } from "./code-highlight-context";
-import { upgradeFencesForPrint } from "./code-fence-defer";
 import {
   cachedReasoningTranscriptIndex,
   resolveReasoningAnchor,
@@ -171,7 +170,6 @@ const printTranscripts = (): void => {
   flushSync(() => {
     for (const print of printers) print();
   });
-  upgradeFencesForPrint();
 };
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
@@ -225,12 +223,17 @@ function useSettledRow(
   }, [row, active]);
 }
 
-const codeRowText = (fragment: ReasoningFragment, leading: boolean): string =>
-  fragment.code!.lines
-    .map(({ line, column, text }, at) =>
-      column === 0 && line > 0 && !(leading && at === 0) ? `\n${text}` : text,
-    )
-    .join("");
+const codeRowText = (
+  fragment: ReasoningFragment,
+  leading: boolean,
+): string[] => {
+  const nodes: string[] = [];
+  for (const [at, { line, column, text }] of fragment.code!.lines.entries()) {
+    if (column === 0 && line > 0 && !(leading && at === 0)) nodes.push("\n");
+    if (text !== "") nodes.push(text);
+  }
+  return nodes;
+};
 
 function Row({
   index,
@@ -246,7 +249,6 @@ function Row({
     <div
       data-index={index}
       data-reasoning-fragment={fragment.key}
-      data-reasoning-row=""
       className="min-w-0"
     >
       {children}
@@ -296,7 +298,6 @@ function CodeGroup({
     <div
       data-slot="reasoning-code-fragment"
       data-language={code.language ?? undefined}
-      data-reasoning-row=""
       className={cn(
         "aui-reasoning-code-fragment relative isolate min-w-0",
         first.first && "aui-reasoning-code-first",

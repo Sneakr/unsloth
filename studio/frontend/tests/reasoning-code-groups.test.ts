@@ -10,6 +10,7 @@ const TRANSCRIPT = readSrc("components/assistant-ui/reasoning-transcript.tsx");
 
 test("thinking code is plain text and never asks the highlighter", () => {
   assert.match(TRANSCRIPT, /data-reasoning-code-row=""\s*>\s*\{codeRowText\(fragments\[index\], at === 0\)\}\s*<\/span>/);
+  assert.match(TRANSCRIPT, /if \(column === 0 && line > 0 && !\(leading && at === 0\)\) nodes\.push\("\\n"\);\s*if \(text !== ""\) nodes\.push\(text\);/, "one text node per line and per line break: a streamed append rewrites only the growing line, and a reading anchor never spans a row's line break");
   assert.equal(/useReasoningHighlight|highlightFenceSource|FenceLine|IntersectionObserver/.test(TRANSCRIPT), false, "no grammar work, worker request or reach observer for a thinking code group");
   assert.match(TRANSCRIPT, /<CodeHighlightEnabledContext\.Provider value=\{false\}>/, "a fence inside a prose row of the trace stays plain too");
   assert.match(

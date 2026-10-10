@@ -17,7 +17,7 @@ test("a fence body becomes skippable only once it carries its measured height", 
   const measure = defer.slice(defer.indexOf("measure.current = () => {"), defer.indexOf("setState({ measured: true, window: next, pins });"));
   assert.ok(measure.indexOf("region.style.setProperty(FENCE_HEIGHT_PROPERTY, declared);") >= 0, "the measure that first marks a fence measured writes its height before it does");
   const autoscroll = readSrc("components/assistant-ui/use-intent-aware-autoscroll.tsx");
-  assert.match(autoscroll, /const onMutation = \(\): void => \{\s*layoutChanged = true;\s*if \(!parkIfHeld\(\)\) \{\s*extendFollow\(\);\s*\}\s*requestTick\(\);\s*\};/, "a mutation never forces layout; following stays the frame loop's job");
+  assert.match(autoscroll, /const onMutation = \(\): void => \{\s*if \(el\.ownerDocument\.hidden\) \{\s*onLayoutChange\(\);\s*return;\s*\}\s*layoutChanged = true;\s*if \(!parkIfHeld\(\)\) \{\s*extendFollow\(\);\s*\}\s*requestTick\(\);\s*\};/, "a mutation on a shown page never forces layout, following stays the frame loop's job; a hidden page runs no frames, so it pins at once and a reply that ends there is at the bottom when the tab comes back");
   assert.match(autoscroll, /const adjustForContentInsertedAbove = useCallback\(\(deltaPx: number\) => \{\s*adjustImplRef\.current\(deltaPx\);\s*return userDetachedRef\.current;\s*\}, \[\]\);/, "the hold learns whether its correction was written, even when the engine rounded it to nothing");
 });
 
@@ -68,7 +68,7 @@ test("without requestIdleCallback, main-thread grammar work waits for the reader
 test("settled fences go to the worker where the main thread's regex engine is slow", () => {
   const markdown = readSrc("components/assistant-ui/markdown-text.tsx");
   assert.match(markdown, /const slowMainThreadRegex =\s*typeof window !== "undefined"\s*&& typeof window\.requestIdleCallback !== "function";/);
-  assert.match(markdown, /if \(streaming \|\| !slowMainThreadRegex\) return false;\s*const state = highlightWorkerState\(\);\s*return \(\s*state !== "unavailable"\s*&& state !== "stalled"\s*&& code\.cover\(options\)\.uncovered > MAIN_THREAD_TAIL_CHARS\s*\);/, "JavaScriptCore interprets every lookbehind pattern, so WebKit tokenizes settled fences off the main thread, unless the main thread's own cache leaves only a short tail, as it does for the fence that just streamed");
+  assert.match(markdown, /if \(!tokenizesOffThread\(body, streaming\)\) \{\s*if \(streaming \|\| !slowMainThreadRegex\) return false;\s*const state = highlightWorkerState\(\);\s*if \(state === "unavailable" \|\| state === "stalled"\) return false;\s*\}\s*return code\.cover\(options\)\.uncovered > MAIN_THREAD_TAIL_CHARS;/, "JavaScriptCore interprets every lookbehind pattern, so WebKit tokenizes settled fences off the main thread, and a fence too long for the main thread goes to the worker, unless the main thread's own cache leaves only a short tail, as it does for the fence that just streamed");
   assert.match(markdown, /const MAIN_THREAD_TAIL_CHARS = 512;/);
   assert.equal(markdown.includes("fenceJustStreamed"), false, "routing reads the cache itself, not a guess about which fence streamed last");
   const plugin = readSrc("components/assistant-ui/code-plugin.ts");

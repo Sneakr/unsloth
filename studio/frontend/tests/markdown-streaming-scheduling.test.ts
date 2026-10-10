@@ -139,9 +139,10 @@ test("stream updates are paint-coalesced with a cost-aware cadence and no length
     /frameTime - renderedAtRef\.current <\s*Math\.max\(\s*16 - Math\.min\(frameIntervalRef\.current, 16\) \/ 2,\s*STREAMING_RENDER_DUTY \* costRef\.current,\s*\)/,
     "frame times come in whole frames, so the 16 ms floor allows half a frame or a 75, 90 or 144 Hz display renders every second or third frame",
   );
-  assert.ok(
-    hook.includes("costRef.current = performance.now() - from;"),
-    "the cost ends at the commit, not at the next frame, or a 60 Hz display renders every third frame",
+  assert.match(
+    hook,
+    /afterFrame\(\(\) => \{\s*const startedAt = performance\.now\(\);\s*flushSync\(\(\) => setDisplayed\(pendingRef\.current\)\);\s*costRef\.current = performance\.now\(\) - startedAt;\s*\}\);/,
+    "the cost is the render alone, in the task after the frame, so an unrelated long task is not charged to the stream and the text resumes as soon as it ends",
   );
 
   // A running message can be replaced rather than appended to, as the audio

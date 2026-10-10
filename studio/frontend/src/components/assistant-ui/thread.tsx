@@ -2305,7 +2305,7 @@ export const Thread: FC<{
       </IntentAwareScrollProvider>
       <ThreadPrimitive.Root
         ref={watchWidthSteps}
-        className="aui-root aui-thread-root relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden"
+        className="aui-root aui-thread-root relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden [contain:style]"
         style={{
           ["--thread-max-width" as string]: "var(--custom-chat-max-width, 48rem)",
           ["--thread-content-max-width" as string]:

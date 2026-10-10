@@ -110,6 +110,10 @@ test("a fence in the thinking box is shown plain, with no highlighter behind it"
   const start = MARKDOWN_TEXT.indexOf("function PlainFenceBlock(");
   const plain = MARKDOWN_TEXT.slice(start, MARKDOWN_TEXT.indexOf("\n}\n", start));
   assert.equal(/useFenceTokens|requestFullHighlight|code\.highlight|noteStreamingFence/.test(plain), false);
+  assert.match(plain, /<PlainFenceShell language=\{languageToken\} source=\{source\} \/>/);
+  assert.match(DEFER, /<code>\{plain \? shellLines\(source\) : shellBody\(source\)\}<\/code>/);
+  assert.match(DEFER, /if \(index > 0\) nodes\.push\("\\n"\);\s*if \(line !== ""\) nodes\.push\(line\);/, "one text node per line and per line break, so a streamed append rewrites only the growing line and a selection above it survives");
+  assert.match(DEFER, /data-unsloth-fence-deferred=\{plain \? undefined : "true"\}/, "a plain fence is never upgraded, so it does not carry the deferred marker");
 });
 
 test("a completed fence on a non-``` form keeps the bounded renderer", () => {

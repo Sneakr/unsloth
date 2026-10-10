@@ -113,19 +113,30 @@ const shellBody = (source: string): string => {
   return trimmed === "" ? "\n" : trimmed;
 };
 
+const shellLines = (source: string): string[] => {
+  const nodes: string[] = [];
+  for (const [index, line] of shellBody(source).split("\n").entries()) {
+    if (index > 0) nodes.push("\n");
+    if (line !== "") nodes.push(line);
+  }
+  return nodes;
+};
+
 function FenceShell({
   language,
   source,
+  plain = false,
 }: {
   language: string | null;
   source: string;
+  plain?: boolean;
 }) {
   return (
     <div
       className="my-4 flex w-full flex-col gap-2 rounded-xl border border-border bg-sidebar p-2"
       data-language={language ?? undefined}
       data-streamdown="code-block"
-      data-unsloth-fence-deferred="true"
+      data-unsloth-fence-deferred={plain ? undefined : "true"}
     >
       <div
         className="flex h-8 items-center text-muted-foreground text-xs"
@@ -140,7 +151,7 @@ function FenceShell({
         data-streamdown="code-block-body"
       >
         <pre>
-          <code>{shellBody(source)}</code>
+          <code>{plain ? shellLines(source) : shellBody(source)}</code>
         </pre>
       </div>
     </div>
@@ -301,11 +312,6 @@ const unwatchScrolling = (): void => {
  */
 const upgradeEverythingForPrint = (): void => {
   latchNow([...unreached]);
-};
-
-export const upgradeFencesForPrint = (): void => {
-  upgradeEverythingForPrint();
-  if (printing) tokenizeForPrint();
 };
 
 /*
@@ -720,6 +726,16 @@ export function useFenceReached(
 }
 
 export const DeferredFenceShell = memo(FenceShell);
+
+export const PlainFenceShell = memo(function PlainFenceShell({
+  language,
+  source,
+}: {
+  language: string | null;
+  source: string;
+}) {
+  return <FenceShell language={language} plain source={source} />;
+});
 
 /*
  * The highlighted body, rendered here rather than by streamdown.

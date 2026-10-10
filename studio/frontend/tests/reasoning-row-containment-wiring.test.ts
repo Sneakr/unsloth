@@ -41,7 +41,6 @@ test("every chunk records its size before any chunk can be skipped", () => {
   assert.ok(at >= 0, "an ungated rule on every transcript chunk");
   const rule = INDEX_CSS.slice(at, INDEX_CSS.indexOf("}", at));
   assert.ok(rule.includes(`contain-intrinsic-size: auto var(${CHUNK_ESTIMATE_PROPERTY})`), "auto, so the engine remembers the rendered size, with the controller's estimate until then");
-  assert.equal(INDEX_CSS.includes("[data-reasoning-row] {"), false, "rows are no longer skip units of their own");
   assert.equal(rule.includes("content-visibility"), false, "sizing alone: the skipping is gated separately");
   const [open, close] = layerBounds(INDEX_CSS, "utilities");
   assert.ok(at > open && at < close);
@@ -109,7 +108,6 @@ test("a row settles one frame after it has been laid out, so the engine remember
   assert.equal(/data-settled=\{/.test(TRANSCRIPT), false, "settling is never a React prop");
   assert.equal((TRANSCRIPT.match(/removeAttribute\(ROW_SETTLED_ATTRIBUTE\)/g) ?? []).length, 1, "and the only unsettle is the relayout after a width change or a blind reveal");
   assert.match(TRANSCRIPT, /if \(blindTranscripts\.delete\(element\) && !widened\) \{\s*if \(settleTimer !== 0\) clearTimeout\(settleTimer\);\s*settleTimer = window\.setTimeout\(resettleLater, RESETTLE_DELAY_MS\);\s*\}/, "a trace shown again at its width after rows settled while it was hidden is laid out again, as after a width change, and a plain reopen costs nothing extra");
-  assert.match(TRANSCRIPT, /data-reasoning-row=""/, "both prose rows and code groups are rows");
   assert.match(TRANSCRIPT, /data-reasoning-chunk=""/, "closed chunks of rows are the skip units");
   assert.match(TRANSCRIPT, /\[CHUNK_ESTIMATE_PROPERTY\]: `\$\{estimate\}px`/, "each chunk carries its estimate for the time before it has rendered");
   assert.match(TRANSCRIPT, /useSettledRow\(box, closed\);/, "a chunk settles once it is closed, never while rows can still join it");
@@ -175,7 +173,7 @@ test("the DOM the rest of the app reads is unchanged", () => {
   assert.match(TRANSCRIPT, /const mounted = committedRef\.current;\s*const prefix = isCovered\(mounted, all\) \? all : mounted;/, "demand measures the spacer the DOM has, not the limit a pending transition will give it");
   assert.match(TRANSCRIPT, /const capture = \(\) => \{\s*frame = 0;\s*if \(!laidOut\(\)\) return;\s*const held = reading !== undefined && hold\(reading\);\s*demand\(\);\s*reading = visibleAnchor\(\);/, "a scroll the engine's own anchoring fires inside the resize frame must not replace the pre-reflow anchor, nor demand rows for a position the width handler is about to undo");
   assert.match(TRANSCRIPT, /if \(committedRef\.current === value\) return;\s*limitRef\.current = value;\s*setLimit\(value\);/, "a print mounts the whole trace even while the last widening transition is still pending");
-  assert.match(TRANSCRIPT, /flushSync\(\(\) => \{\s*for \(const print of printers\) print\(\);\s*\}\);\s*upgradeFencesForPrint\(\);/, "every open transcript lands in one synchronous commit, and then the fences those rows brought are latched");
+  assert.match(TRANSCRIPT, /const printTranscripts = \(\): void => \{\s*flushSync\(\(\) => \{\s*for \(const print of printers\) print\(\);\s*\}\);\s*\};/, "every open transcript lands in one synchronous commit; its code is plain, so there is no fence left to latch");
   assert.match(TRANSCRIPT, /for \(let i = firstEndingBelow\(rows, bounds\.top\); i < rows\.length; i \+= 1\) \{\s*const row = rows\[i\];\s*if \(row\.getBoundingClientRect\(\)\.top >= bounds\.bottom\) return undefined;/, "a fold row without capturable text falls through to the next visible row");
   assert.match(TRANSCRIPT, /const chunk = chunks\[at\];\s*if \(chunk\.getBoundingClientRect\(\)\.top >= bounds\.bottom\) break;/, "and on into the next chunk while it is still on screen");
   assert.match(TRANSCRIPT, /row\.removeAttribute\(ROW_SETTLED_ATTRIBUTE\);\s*settleQueue\.add\(row\);/, "re-settling goes through the same queue as the first settle");
