@@ -4,7 +4,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createSettleQueue } from "../src/components/assistant-ui/reasoning-settle-queue.ts";
+import {
+  createRemeasureQueue,
+  createSettleQueue,
+} from "../src/components/assistant-ui/reasoning-settle-queue.ts";
 
 const frames = () => {
   let queue: (() => void)[] = [];
@@ -92,5 +95,52 @@ test("forgetting a row at either stage leaves the rows beside it", () => {
   assert.deepEqual(settled, ["ripe kept"]);
   clock.run();
   assert.deepEqual(settled, ["ripe kept", "queued kept"]);
+  assert.equal(clock.pending(), 0);
+});
+
+test("remeasuring long transcripts lays out one row per frame and preserves the settle delay", () => {
+  const clock = frames();
+  const visible = new Set<number>();
+  const settled: number[] = [];
+  const settle = createSettleQueue<number>(clock.request, (row) => {
+    visible.delete(row);
+    settled.push(row);
+  });
+  const remeasure = createRemeasureQueue<number>(clock.request, (row) => {
+    visible.add(row);
+    settle.add(row);
+  }, () => false);
+  for (let i = 0; i < 100; i++) remeasure.add(i);
+  clock.run();
+  assert.deepEqual([...visible], [0]);
+  assert.deepEqual(settled, []);
+  clock.run();
+  assert.deepEqual([...visible], [0, 1]);
+  assert.deepEqual(settled, []);
+  for (let i = 0; clock.pending() && i < 200; i++) {
+    clock.run();
+    assert.ok(visible.size <= 3);
+  }
+  assert.deepEqual(settled, Array.from({ length: 100 }, (_, i) => i));
+  assert.equal(clock.pending(), 0);
+});
+
+test("a drag pauses remeasurement, repeated resizes coalesce, and removed rows stay removed", () => {
+  const clock = frames();
+  let dragging = true;
+  const measured: string[] = [];
+  const queue = createRemeasureQueue<string>(clock.request, (row) => measured.push(row), () => dragging);
+  queue.add("first");
+  queue.add("removed");
+  queue.add("last");
+  clock.run();
+  assert.deepEqual(measured, []);
+  queue.add("first");
+  queue.forget("removed");
+  dragging = false;
+  clock.run();
+  assert.deepEqual(measured, ["first"]);
+  clock.run();
+  assert.deepEqual(measured, ["first", "last"]);
   assert.equal(clock.pending(), 0);
 });

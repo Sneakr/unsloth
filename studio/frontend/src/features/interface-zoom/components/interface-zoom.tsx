@@ -217,7 +217,6 @@ export function InterfaceZoom() {
     const armWheel = () => {
       if (wheelArmed) return;
       wheelArmed = true;
-      window.removeEventListener("wheel", onWheel);
       window.addEventListener("wheel", onWheel, { passive: false });
     };
     const disarmWheel = () => {

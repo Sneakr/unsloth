@@ -61,7 +61,7 @@ import {
   CHUNK_ESTIMATE_PROPERTY,
   ROW_SETTLED_ATTRIBUTE,
 } from "./reasoning-row-containment-mode";
-import { createSettleQueue } from "./reasoning-settle-queue";
+import { createRemeasureQueue, createSettleQueue } from "./reasoning-settle-queue";
 import { hasPendingProgressiveMounts } from "./progressive-messages";
 import { panelDragInProgress } from "@/components/ui/panel-drag-overlay";
 import { cn } from "@/lib/utils";
@@ -84,6 +84,7 @@ type Props = {
 
 const hiddenTranscripts = new WeakSet<Element>();
 const blindTranscripts = new WeakSet<Element>();
+const rowRemeasurers = new WeakMap<Element, (row: HTMLElement) => void>();
 const withoutIdleCallback =
   typeof window !== "undefined" &&
   typeof window.requestIdleCallback !== "function";
@@ -99,12 +100,20 @@ const settleQueue = createSettleQueue<HTMLElement>(
   },
 );
 
+const remeasureQueue = createRemeasureQueue<HTMLElement>(
+  (callback) => requestAnimationFrame(callback),
+  (row) => {
+    if (!row.isConnected) return;
+    if (row.parentElement) rowRemeasurers.get(row.parentElement)?.(row);
+  },
+  panelDragInProgress,
+);
+
 const resettleRows = (root: HTMLElement): void => {
   for (const row of root.querySelectorAll<HTMLElement>(
     `[${ROW_SETTLED_ATTRIBUTE}]`,
   )) {
-    row.removeAttribute(ROW_SETTLED_ATTRIBUTE);
-    settleQueue.add(row);
+    remeasureQueue.add(row);
   }
 };
 
@@ -221,6 +230,7 @@ function useSettledRow(
     });
     return () => {
       changed.disconnect();
+      remeasureQueue.forget(element);
       settleQueue.forget(element);
     };
   }, [row, active]);
@@ -918,6 +928,25 @@ export function ReasoningTranscript({
     };
     const atBottom = () =>
       scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 1;
+    let remeasureResidue = 0;
+    rowRemeasurers.set(element, (row) => {
+      const bounds = scroll.getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      row.removeAttribute(ROW_SETTLED_ATTRIBUTE);
+      settleQueue.add(row);
+      if (!box.width || box.bottom > bounds.top) {
+        remeasureResidue = 0;
+        return;
+      }
+      const shift =
+        element.getBoundingClientRect().bottom -
+        scroll.getBoundingClientRect().top -
+        (box.bottom - bounds.top) +
+        remeasureResidue;
+      const before = scroll.scrollTop;
+      const acted = adjustAbove(Math.round(shift));
+      remeasureResidue = acted ? shift - (scroll.scrollTop - before) : 0;
+    });
     const observer = new ResizeObserver(() => {
       const box = element.getBoundingClientRect();
       if (!box.width) {
@@ -958,6 +987,7 @@ export function ReasoningTranscript({
       if (settleTimer !== 0) clearTimeout(settleTimer);
       hiddenTranscripts.delete(element);
       blindTranscripts.delete(element);
+      rowRemeasurers.delete(element);
     };
   }, [adjustAbove, setIslands]);
 

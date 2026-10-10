@@ -104,7 +104,7 @@ test("a row settles one frame after it has been laid out, so the engine remember
   assert.match(TRANSCRIPT, /setIslands\(next\);\s*carrying = true;\s*return true;/);
   assert.match(TRANSCRIPT, /after: \(\) => \{\s*if \(carrying\) \{\s*carrying = false;\s*keepOnScreen\(\);\s*\}/, "and the island commit's, where native anchoring on a reply below kept the page at the clamped bottom");
   assert.match(TRANSCRIPT, /if \(Math\.abs\(shift\) >= SHIFT_EPSILON_PX\) adjustAbove\(Math\.round\(shift\)\);/, "undoes its growth, which WebKit's anchoring leaves to the page, so a reader below it stays put; native anchoring has already zeroed the shift elsewhere");
-  assert.match(TRANSCRIPT, /return \(\) => \{\s*changed\.disconnect\(\);\s*settleQueue\.forget\(element\);\s*\};/, "a chunk that unmounts or reopens leaves the queue");
+  assert.match(TRANSCRIPT, /return \(\) => \{\s*changed\.disconnect\(\);\s*remeasureQueue\.forget\(element\);\s*settleQueue\.forget\(element\);\s*\};/, "a chunk that unmounts or reopens leaves both queues");
   assert.equal(/data-settled=\{/.test(TRANSCRIPT), false, "settling is never a React prop");
   assert.equal((TRANSCRIPT.match(/removeAttribute\(ROW_SETTLED_ATTRIBUTE\)/g) ?? []).length, 1, "and the only unsettle is the relayout after a width change or a blind reveal");
   assert.match(TRANSCRIPT, /if \(blindTranscripts\.delete\(element\) && !widened\) \{\s*if \(settleTimer !== 0\) clearTimeout\(settleTimer\);\s*settleTimer = window\.setTimeout\(resettleLater, RESETTLE_DELAY_MS\);\s*\}/, "a trace shown again at its width after rows settled while it was hidden is laid out again, as after a width change, and a plain reopen costs nothing extra");
