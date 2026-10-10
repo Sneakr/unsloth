@@ -33,6 +33,14 @@ test("the plain deferral stays reachable as the ablation arm", () => {
   assert.equal(resolveFenceMode("window", ""), "window");
 });
 
+test("every answer fence takes its line window from the mode, streaming or not", () => {
+  assert.deepEqual(
+    readSrc("components/assistant-ui/markdown-text.tsx").match(/windowing=\{[^}]*\}/g),
+    ['windowing={fenceMode() === "window"}', 'windowing={mode === "window"}'],
+    "a streaming fence that windowed whatever the mode kept \"off\" from restoring the old rendering",
+  );
+});
+
 test("the build flag overrides the default in both directions", () => {
   // DOWN: an install that wants exactly the old rendering says so and gets it.
   assert.equal(resolveFenceMode(undefined, "off"), "off");

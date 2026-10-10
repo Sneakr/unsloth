@@ -41,7 +41,10 @@ import {
   chunkEndAt,
   chunkPieces,
   chunkStartAt,
-  estimateFragmentHeight,
+  type ChunkPiece,
+  type ChunkSlice,
+  closedChunkUnchanged,
+  estimateFragmentHeights,
   type FragmentGeometry,
   frameBudget,
   INITIAL_VIEWPORTS,
@@ -235,6 +238,26 @@ const codeRowText = (
   return nodes;
 };
 
+const CodeRow = memo(function CodeRow({
+  index,
+  fragment,
+  leading,
+}: {
+  index: number;
+  fragment: ReasoningFragment;
+  leading: boolean;
+}) {
+  return (
+    <span
+      data-index={index}
+      data-reasoning-fragment={fragment.key}
+      data-reasoning-code-row=""
+    >
+      {codeRowText(fragment, leading)}
+    </span>
+  );
+});
+
 function Row({
   index,
   fragment,
@@ -250,29 +273,6 @@ function Row({
       data-index={index}
       data-reasoning-fragment={fragment.key}
       className="min-w-0"
-    >
-      {children}
-    </div>
-  );
-}
-
-function Chunk({
-  closed,
-  estimate,
-  children,
-}: {
-  closed: boolean;
-  estimate: number;
-  children: React.ReactNode;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  useSettledRow(box, closed);
-  return (
-    <div
-      ref={box}
-      data-reasoning-chunk=""
-      className="min-w-0"
-      style={{ [CHUNK_ESTIMATE_PROPERTY]: `${estimate}px` } as CSSProperties}
     >
       {children}
     </div>
@@ -306,7 +306,7 @@ function CodeGroup({
     >
       {first.first && (
         <CodeBlockActions
-          disabled={streaming && code.incomplete}
+          disabled={streaming}
           language={code.language}
           source={code.source}
         />
@@ -319,14 +319,12 @@ function CodeGroup({
       <div className="aui-reasoning-code-lines !m-0 min-h-[1lh] whitespace-pre-wrap [overflow-wrap:anywhere] font-mono">
         <code>
           {indices.map((index, at) => (
-            <span
+            <CodeRow
               key={fragments[index].key}
-              data-index={index}
-              data-reasoning-fragment={fragments[index].key}
-              data-reasoning-code-row=""
-            >
-              {codeRowText(fragments[index], at === 0)}
-            </span>
+              index={index}
+              fragment={fragments[index]}
+              leading={at === 0}
+            />
           ))}
           {breaksAfter && "\n"}
         </code>
@@ -386,6 +384,63 @@ const Fragment = memo(function Fragment({
   );
 });
 
+type ChunkProps = {
+  slices: readonly ChunkSlice[];
+  fragments: readonly ReasoningFragment[];
+  closed: boolean;
+  estimate: number;
+  messageId: string;
+  messageHasRenderableRenderHtmlTool: boolean;
+};
+
+const Chunk = memo(function Chunk({
+  slices,
+  fragments,
+  closed,
+  estimate,
+  messageId,
+  messageHasRenderableRenderHtmlTool,
+}: ChunkProps) {
+  const box = useRef<HTMLDivElement>(null);
+  useSettledRow(box, closed);
+  return (
+    <div
+      ref={box}
+      data-reasoning-chunk=""
+      className="min-w-0"
+      style={{ [CHUNK_ESTIMATE_PROPERTY]: `${estimate}px` } as CSSProperties}
+    >
+      {slices.map(({ key, code, first, end, streaming }) => {
+        if (code) {
+          const indices: number[] = [];
+          for (let i = first; i < end; i += 1) indices.push(i);
+          return (
+            <CodeGroup
+              key={key}
+              indices={indices}
+              fragments={fragments}
+              streaming={streaming}
+            />
+          );
+        }
+        const fragment = fragments[first];
+        return (
+          <Row key={key} index={first} fragment={fragment}>
+            <Fragment
+              fragment={fragment}
+              messageId={messageId}
+              messageHasRenderableRenderHtmlTool={
+                messageHasRenderableRenderHtmlTool
+              }
+              streaming={streaming}
+            />
+          </Row>
+        );
+      })}
+    </div>
+  );
+}, closedChunkUnchanged);
+
 const DEFAULT_GEOMETRY: FragmentGeometry = {
   width: 640,
   lineHeight: 24,
@@ -444,7 +499,7 @@ export function ReasoningTranscript({
   const fragmentsRef = useRef(fragments);
   const [geometry, setGeometry] = useState(DEFAULT_GEOMETRY);
   const estimates = useMemo(
-    () => fragments.map((fragment) => estimateFragmentHeight(fragment, geometry)),
+    () => estimateFragmentHeights(fragments, geometry),
     [fragments, geometry],
   );
   const grid = useMemo(
@@ -930,34 +985,23 @@ export function ReasoningTranscript({
   const shown = covered ? fragments.length : limit;
   const sealed = covered && !streaming;
   const fragmentKey = (at: number) => fragments[at].key;
-  const renderSlice = (slice: { index: number; first: number; end: number }) => {
-    const group = grid.groups[slice.index];
-    if (group.code) {
-      const indices: number[] = [];
-      for (let i = slice.first; i < slice.end; i += 1) indices.push(i);
-      return (
-        <CodeGroup
-          key={group.key}
-          indices={indices}
-          fragments={fragments}
-          streaming={streaming}
-        />
-      );
-    }
-    const i = slice.first;
-    const fragment = fragments[i];
-    return (
-      <Row key={fragment.key} index={i} fragment={fragment}>
-        <Fragment
-          fragment={fragment}
-          messageId={messageId}
-          messageHasRenderableRenderHtmlTool={
-            messageHasRenderableRenderHtmlTool
-          }
-          streaming={streaming && i === fragments.length - 1}
-        />
-      </Row>
-    );
+  const sliceOf = ({
+    index,
+    first,
+    end,
+  }: ChunkPiece["groups"][number]): ChunkSlice => {
+    const group = grid.groups[index];
+    return {
+      key: group.key,
+      code: group.code,
+      first,
+      end,
+      streaming:
+        streaming &&
+        (group.code
+          ? fragments[first].code!.incomplete
+          : first === fragments.length - 1),
+    };
   };
   const rendered: React.ReactNode[] = [];
   for (const { from, to, reserve } of mountPlan(
@@ -970,11 +1014,15 @@ export function ReasoningTranscript({
         rendered.push(
           <Chunk
             key={piece.key}
+            slices={piece.groups.map(sliceOf)}
+            fragments={fragments}
             closed={piece.whole && (!piece.last || sealed)}
             estimate={grid.heights[piece.end] - grid.heights[piece.first]}
-          >
-            {piece.groups.map(renderSlice)}
-          </Chunk>,
+            messageId={messageId}
+            messageHasRenderableRenderHtmlTool={
+              messageHasRenderableRenderHtmlTool
+            }
+          />,
         );
       }
       continue;

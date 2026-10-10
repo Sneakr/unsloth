@@ -75,14 +75,18 @@ function mountDraft(value: number, onDraft?: (value: number | null) => void) {
     },
   });
   const commits: number[] = [];
+  let owned = value;
   const SliderRow = () => {
     cursor = 0;
-    return useSliderDraft(value, (next) => commits.push(next), onDraft);
+    return useSliderDraft(owned, (next) => commits.push(next), onDraft);
   };
   const unmount = () => {
     for (const cleanup of cleanups) cleanup();
   };
-  return { render: SliderRow, commits, synced, unmount };
+  const setOwned = (next: number) => {
+    owned = next;
+  };
+  return { render: SliderRow, commits, synced, unmount, setOwned };
 }
 
 test("a drag moves the thumb locally and hands its owner one settled value", () => {
@@ -156,6 +160,24 @@ test("a drag whose row goes away keeps the value it reached, as main's live writ
   assert.deepEqual(ended.commits, [0.8], "a drag that already ended is not committed twice");
 });
 
+test("a change from outside after the last move wins at release, as it did with main's live writes", () => {
+  const held = mountDraft(0.7);
+  held.render().sliderProps.onPointerDown(FINGER);
+  held.render().sliderProps.onValueChange([0.9]);
+  held.setOwned(0.6);
+  held.render().sliderProps.onLostPointerCapture(FINGER);
+  assert.deepEqual(held.commits, [], "a model load that landed while the thumb was held still was overwritten by the dragged value");
+  assert.equal(held.render().draft, null);
+
+  const moved = mountDraft(0.7);
+  moved.render().sliderProps.onPointerDown(FINGER);
+  moved.render().sliderProps.onValueChange([0.9]);
+  moved.setOwned(0.6);
+  moved.render().sliderProps.onValueChange([0.8]);
+  moved.render().sliderProps.onLostPointerCapture(FINGER);
+  assert.deepEqual(moved.commits, [0.8], "a move after the change is the newer intent");
+});
+
 test("a second finger on the slider keeps the drag going after the first one lifts", () => {
   const { render, commits } = mountDraft(0.5);
   render().sliderProps.onPointerDown(FINGER);
@@ -209,6 +231,18 @@ test("what an owner shows beside its slider follows the drag", () => {
   const music = readSrc("features/audio/components/music-edit-inputs.tsx");
   assert.match(music, /onDraft=\{setDraggedExtendS\}/);
   assert.match(music, /tailS=\{action === "extend" \? \(draggedExtendS \?\? draft\.extendS\) : 0\}/, "the extend tail stopped growing while Add seconds was dragged");
+  assert.match(
+    readSrc("features/chat/chat-settings-sheet.tsx"),
+    /const sliderProps = commitWhileDragging\s*\? \{ value: \[value\], onValueChange: \(\[v\]: number\[\]\) => commit\(v\) \}\s*: draftProps;/,
+  );
+  assert.match(
+    readSrc("features/audio/pages/music-page.tsx"),
+    /label="Variations"[\s\S]*?onChange=\{onChange\}\s*commitWhileDragging/,
+    "the reload notice under Variations named the count from before the drag",
+  );
+  const edit = readSrc("features/audio/pages/edit-page.tsx");
+  assert.match(edit, /onChange=\{\(speed\) => setDelivery\(\{ speed \}\)\}\s*commitWhileDragging/, "the Generate blocker and the edit-pass text lagged a Speed drag");
+  assert.match(edit, /onChange=\{\(pitchSteps\) => setDelivery\(\{ pitchSteps \}\)\}\s*commitWhileDragging/);
 });
 
 test("a sampling change re-renders the Run settings panel, not the chat page", () => {

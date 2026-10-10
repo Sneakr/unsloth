@@ -252,6 +252,11 @@ test("the zoom popup takes the find bar's corner", () => {
     css,
     /html\[data-blocking-screen-open\] \[data-find-bar-layer\],\s*html\[data-blocking-screen-open\] \.interface-zoom-position \{\s*display: none;/,
   );
+  assert.match(
+    readSrc("lib/document-flag.ts"),
+    /useLayoutEffect\(\(\) => \{\s*if \(!active\) return;\s*return acquireDocumentFlag\(name\);/,
+    "a screen that mounts from a background update painted under the find bar for a frame before a passive effect set the flag",
+  );
   assert.match(provider, /data-blocking-screen=""\s*className="fixed inset-0 z-40 bg-background"/);
   assert.match(
     readSrc("components/tauri/startup-screen.tsx"),

@@ -46,7 +46,7 @@ Object.assign(globalThis, {
 });
 
 registerBundlerResolver();
-const { acquireDragOverlay, releaseDragOverlay, panelDragInProgress } =
+const { acquireDragOverlay, armPanelDrag, releaseDragOverlay, panelDragInProgress } =
   await import("../src/components/ui/panel-drag-overlay.ts");
 
 test("a held drag overlay marks the drag in progress until its last owner lets go", () => {
@@ -84,8 +84,33 @@ test("a native browser page yields to its snapshot while any panel is dragged", 
   );
   for (const [file, pattern] of [
     ["components/ui/panel-resize-handle.tsx", /acquireDragOverlay\(\)/],
-    ["features/chat/chat-page.tsx", /acquireDragOverlay\(\);/],
+    ["features/chat/chat-page.tsx", /armPanelDrag\(event\.clientX\);/],
   ] as const) {
     assert.match(readSrc(file), pattern, file);
   }
+});
+
+test("a split press marks the drag at once but covers the page only once the pointer travels", () => {
+  const click = armPanelDrag(100);
+  assert.equal(htmlAttributes.get("data-panel-resizing"), "true", "the library blanks both panels on press, so the thread's wrapper must already keep its pointer events");
+  click.move(102);
+  assert.equal(body.length, 0, "a click hid a native browser page behind its snapshot and showed it again");
+  assert.equal(panelDragInProgress(), false);
+  click.release();
+  assert.equal(htmlAttributes.has("data-panel-resizing"), false);
+
+  const drag = armPanelDrag(100);
+  drag.move(96);
+  assert.equal(body.length, 1);
+  assert.equal(panelDragInProgress(), true);
+  acquireDragOverlay();
+  drag.release();
+  drag.release();
+  assert.equal(body.length, 1, "another owner keeps the overlay");
+  assert.equal(htmlAttributes.get("data-panel-resizing"), "true");
+  releaseDragOverlay();
+  assert.equal(body.length, 0);
+  assert.equal(htmlAttributes.has("data-panel-resizing"), false);
+  drag.move(50);
+  assert.equal(body.length, 0, "a released press never takes the overlay");
 });

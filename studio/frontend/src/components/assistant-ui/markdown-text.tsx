@@ -1117,7 +1117,7 @@ function StreamingFenceBlock({
         language={languageToken}
         result={tokens}
         source={source}
-        windowing={isIncomplete || fenceMode() === "window"}
+        windowing={fenceMode() === "window"}
       />
     </MarkdownRendererBoundary>
   );

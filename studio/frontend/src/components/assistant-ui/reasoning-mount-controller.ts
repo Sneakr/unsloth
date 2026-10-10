@@ -32,8 +32,13 @@ export const frameBudget = (
         fragments: WIDEN_FRAGMENTS_PER_FRAME,
       };
 
+type EstimatedFragment = Pick<
+  ReasoningFragment,
+  "text" | "code" | "first" | "last" | "hidden"
+>;
+
 export const estimateFragmentHeight = (
-  fragment: Pick<ReasoningFragment, "text" | "code" | "first" | "last" | "hidden">,
+  fragment: EstimatedFragment,
   geometry: FragmentGeometry,
 ): number => {
   if (fragment.hidden) return 0;
@@ -58,6 +63,30 @@ export const estimateFragmentHeight = (
         (fragment.last ? geometry.codeFooter : 0)
     : Math.max(1, lines - 2) * geometry.lineHeight +
         (fragment.first ? 16 : 0);
+};
+
+const estimated = new WeakMap<
+  FragmentGeometry,
+  WeakMap<EstimatedFragment, number>
+>();
+
+export const estimateFragmentHeights = (
+  fragments: readonly EstimatedFragment[],
+  geometry: FragmentGeometry,
+): number[] => {
+  let known = estimated.get(geometry);
+  if (known === undefined) {
+    known = new WeakMap();
+    estimated.set(geometry, known);
+  }
+  return fragments.map((fragment) => {
+    let height = known.get(fragment);
+    if (height === undefined) {
+      height = estimateFragmentHeight(fragment, geometry);
+      known.set(fragment, height);
+    }
+    return height;
+  });
 };
 
 export const initialRows = (
@@ -334,6 +363,56 @@ export const chunkPieces = (
     at = end;
   }
   return pieces;
+};
+
+export type ChunkSlice = {
+  readonly key: string;
+  readonly code: boolean;
+  readonly first: number;
+  readonly end: number;
+  readonly streaming: boolean;
+};
+
+type ChunkRender = {
+  readonly slices: readonly ChunkSlice[];
+  readonly fragments: readonly unknown[];
+  readonly closed: boolean;
+  readonly [prop: string]: unknown;
+};
+
+const sameSlice = (a: ChunkSlice, b: ChunkSlice): boolean =>
+  a.key === b.key
+  && a.code === b.code
+  && a.first === b.first
+  && a.end === b.end
+  && a.streaming === b.streaming;
+
+export const closedChunkUnchanged = (
+  previous: ChunkRender,
+  next: ChunkRender,
+): boolean => {
+  const props = Object.keys(next);
+  if (
+    !previous.closed
+    || !next.closed
+    || Object.keys(previous).length !== props.length
+  )
+    return false;
+  for (const prop of props) {
+    if (prop === "slices" || prop === "fragments") continue;
+    if (!Object.is(previous[prop], next[prop])) return false;
+  }
+  const slices = next.slices;
+  if (
+    slices.length === 0
+    || previous.slices.length !== slices.length
+    || !slices.every((slice, at) => sameSlice(previous.slices[at], slice))
+  )
+    return false;
+  for (let at = slices[0].first; at <= slices[slices.length - 1].end; at += 1) {
+    if (previous.fragments[at] !== next.fragments[at]) return false;
+  }
+  return true;
 };
 
 export type Island = {

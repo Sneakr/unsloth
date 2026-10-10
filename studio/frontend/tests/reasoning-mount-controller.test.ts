@@ -10,6 +10,8 @@ import {
   WIDEN_CHARACTERS_PER_FRAME,
   WIDEN_FRAGMENTS_PER_FRAME,
   estimateFragmentHeight,
+  estimateFragmentHeights,
+  closedChunkUnchanged,
   frameBudget,
   buildChunkGrid,
   chunkEndAt,
@@ -67,6 +69,28 @@ test("long lines wrap into the estimate at the measured column count", () => {
   const single = estimateFragmentHeight({ text: "x", first: false, last: false }, geometry);
   const wrapped = estimateFragmentHeight({ text, first: false, last: false }, geometry);
   assert.ok(wrapped > single, "a wrapped line costs more than a short one");
+});
+
+test("a streaming commit estimates only the rows it has not seen at this geometry", () => {
+  let reads = 0;
+  const row = (text: string) => ({
+    get text() {
+      reads += 1;
+      return text;
+    },
+    first: false,
+    last: false,
+  });
+  const kept = row("one\ntwo\nthree");
+  const first = estimateFragmentHeights([kept, row("x")], geometry);
+  assert.deepEqual(first, [estimateFragmentHeight(kept, geometry), estimateFragmentHeight({ text: "x", first: false, last: false }, geometry)]);
+  reads = 0;
+  const grown = row("x y");
+  assert.deepEqual(estimateFragmentHeights([kept, grown], geometry), [first[0], estimateFragmentHeight(grown, geometry)]);
+  assert.equal(reads, 2, "every commit re-split the text of every row in the trace");
+  reads = 0;
+  estimateFragmentHeights([kept], { ...geometry, width: 320 });
+  assert.equal(reads, 1, "a new width estimates every row again");
 });
 
 test("the first commit covers the budget and always includes the anchor row", () => {
@@ -238,6 +262,33 @@ test("a range cuts grid chunks into pieces whose keys stay unique and stable as 
   assert.equal(prefix.at(-1)?.whole, false, "a piece missing part of its chunk stays open");
   const grownPrefix = chunkPieces(grid, key, 0, 4);
   assert.deepEqual(grownPrefix.map((p) => p.key), prefix.map((p) => p.key), "a prefix growing inside a chunk keeps every key");
+});
+
+test("a closed chunk re-renders only when a prop, a slice or one of its rows changes", () => {
+  const rows = [{}, {}, {}, {}];
+  const slice = { key: "a", code: false, first: 1, end: 2, streaming: false };
+  const chunk = (over: Record<string, unknown> = {}) => ({
+    slices: [slice, { key: "b", code: true, first: 2, end: 3, streaming: false }],
+    fragments: rows,
+    closed: true,
+    estimate: 120,
+    messageId: "m",
+    ...over,
+  });
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ fragments: [...rows, {}] })), true, "a commit that only grew the trace past it leaves it alone");
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ closed: false })), false);
+  assert.equal(closedChunkUnchanged(chunk({ closed: false }), chunk()), false, "the commit that closes it renders it");
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ estimate: 140 })), false);
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ messageId: "n" })), false, "any other prop is compared too");
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ extra: 1 })), false);
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ fragments: [rows[0], {}, rows[2], rows[3]] })), false, "a replaced row inside it");
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ fragments: [rows[0], rows[1], rows[2], {}] })), false, "or the row after it, whose first line decides the group's trailing line break");
+  assert.equal(closedChunkUnchanged(chunk(), chunk({ fragments: [{}, rows[1], rows[2], rows[3]] })), true, "a row before it is not its business");
+  assert.equal(
+    closedChunkUnchanged(chunk(), chunk({ slices: [slice, { key: "b", code: true, first: 2, end: 3, streaming: true }] })),
+    false,
+    "a fence still being written keeps its copy button disabled, and the commit that finishes it enables the button with the whole source",
+  );
 });
 
 test("islands only grow, keep their identity, and stay listed after the prefix passes them", () => {

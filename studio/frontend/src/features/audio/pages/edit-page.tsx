@@ -238,6 +238,7 @@ function EditInputs({
             format={(v) => `${Number(v.toFixed(2))}×`}
             disabled={disabled}
             onChange={(speed) => setDelivery({ speed })}
+            commitWhileDragging
           />
           <ParamSlider
             label={EDIT_COPY.pitchLabel}
@@ -248,6 +249,7 @@ function EditInputs({
             format={(v) => (v > 0 ? `+${v} steps` : "Off")}
             disabled={disabled}
             onChange={(pitchSteps) => setDelivery({ pitchSteps })}
+            commitWhileDragging
           />
           <p className="text-ui-11p5 leading-snug text-muted-foreground">
             {EDIT_COPY.pitchHint}

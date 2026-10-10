@@ -111,6 +111,8 @@ test("a row settles one frame after it has been laid out, so the engine remember
   assert.match(TRANSCRIPT, /data-reasoning-chunk=""/, "closed chunks of rows are the skip units");
   assert.match(TRANSCRIPT, /\[CHUNK_ESTIMATE_PROPERTY\]: `\$\{estimate\}px`/, "each chunk carries its estimate for the time before it has rendered");
   assert.match(TRANSCRIPT, /useSettledRow\(box, closed\);/, "a chunk settles once it is closed, never while rows can still join it");
+  assert.match(TRANSCRIPT, /const Chunk = memo\(function Chunk\(\{[\s\S]*?\}, closedChunkUnchanged\);/, "every streaming commit re-rendered every mounted chunk, row and code group of the trace");
+  assert.match(TRANSCRIPT, /streaming:\s*streaming &&\s*\(group\.code\s*\? fragments\[first\]\.code!\.incomplete\s*: first === fragments\.length - 1\),/, "a slice says whether it is still being written, so a closed chunk holding a fence's copy button renders again when the fence ends");
   assert.equal((TRANSCRIPT.match(/useSettledRow\(/g) ?? []).length, 2, "rows and code groups no longer settle on their own");
   assert.match(TRANSCRIPT, /closed=\{piece\.whole && \(!piece\.last \|\| sealed\)\}/, "only a whole grid chunk settles, and the last one only once the trace is complete and mounted");
   assert.match(TRANSCRIPT, /const sealed = covered && !streaming;/);
@@ -122,13 +124,13 @@ test("the DOM the rest of the app reads is unchanged", () => {
     'data-slot="reasoning-code-fragment"',
     'data-reasoning-code-row=""',
     "data-reasoning-fragment={fragment.key}",
-    "data-reasoning-fragment={fragments[index].key}",
     'style={{ overflowAnchor: "none" }}',
     "SearchImagesEnabledContext.Provider value={false}",
     "aui-reasoning-prose-fragment",
   ]) {
     assert.ok(TRANSCRIPT.includes(token), `kept: ${token}`);
   }
+  assert.equal(TRANSCRIPT.split("data-reasoning-fragment={fragment.key}").length - 1, 2, "prose rows and code rows");
   assert.match(TRANSCRIPT, /if \(touches\) detach\(\);/, "a selection or focus inside the trace still parks the autoscroll");
   assert.match(TRANSCRIPT, /for \(const \{ from, to, reserve \} of mountPlan\(\s*shown,\s*islands,\s*fragments\.length,\s*\)\) \{/, "every unmounted stretch keeps its estimated height, laid out by the plan");
   assert.match(TRANSCRIPT, /data-reasoning-reserve=""\s*style=\{\{ height: grid\.heights\[to\] - grid\.heights\[from\] \}\}/, "as a spacer that shrinks as rows mount, so the thread below never jumps");

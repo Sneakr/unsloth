@@ -11,17 +11,18 @@ export function useSliderDraft(
 ) {
   const [draft, setDraft] = useState<number | null>(null);
   const pointers = useRef(new Set<number>());
-  const dragged = useRef<number | null>(null);
+  const dragged = useRef<{ value: number; base: number } | null>(null);
   const show = (next: number | null) => {
     setDraft(next);
     onDraft?.(next);
   };
   const end = () => {
-    const next = dragged.current;
+    const drag = dragged.current;
     pointers.current.clear();
     dragged.current = null;
     show(null);
-    if (next !== null && next !== value) onCommit(next);
+    if (drag !== null && drag.base === value && drag.value !== value)
+      onCommit(drag.value);
   };
   const endOnUnmount = useEffectEvent(() => {
     if (pointers.current.size > 0) end();
@@ -36,7 +37,7 @@ export function useSliderDraft(
       },
       onValueChange: ([next]: number[]) => {
         if (pointers.current.size === 0) return;
-        dragged.current = next;
+        dragged.current = { value: next, base: value };
         flushSync(() => show(next));
       },
       onValueCommit: ([next]: number[]) => {

@@ -172,6 +172,7 @@ export function ParamSlider({
   valueSize,
   disabled,
   inline,
+  commitWhileDragging = false,
 }: {
   label: string;
   value: number;
@@ -186,12 +187,17 @@ export function ParamSlider({
   disabled?: boolean;
   /** Label, track and value on one row, for narrow settings columns. */
   inline?: boolean;
+  commitWhileDragging?: boolean;
 }) {
-  const { draft, sliderProps } = useSliderDraft(
+  const commit = (v: number) => onChange(snapToStep(v, step, min, max));
+  const { draft, sliderProps: draftProps } = useSliderDraft(
     value,
-    (v) => onChange(snapToStep(v, step, min, max)),
+    commit,
     onDraft,
   );
+  const sliderProps = commitWhileDragging
+    ? { value: [value], onValueChange: ([v]: number[]) => commit(v) }
+    : draftProps;
   const shown = draft ?? value;
   if (inline) {
     return (

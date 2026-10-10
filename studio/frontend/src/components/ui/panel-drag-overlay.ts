@@ -21,11 +21,26 @@ const PANEL_RESIZING_ATTRIBUTE = "data-panel-resizing"
 /** Nested drags cannot happen through pointer capture, but a stuck overlay would
  *  swallow the whole UI, so ownership is explicit rather than assumed. */
 let dragOverlayOwners = 0
+let resizingHolders = 0
+const DRAG_SLOP = 4
+
+function holdResizing(): void {
+  resizingHolders += 1
+  if (resizingHolders > 1) return
+  document.documentElement.setAttribute(PANEL_RESIZING_ATTRIBUTE, "true")
+}
+
+function releaseResizing(): void {
+  if (resizingHolders === 0) return
+  resizingHolders -= 1
+  if (resizingHolders > 0) return
+  document.documentElement.removeAttribute(PANEL_RESIZING_ATTRIBUTE)
+}
 
 export function acquireDragOverlay(): void {
   dragOverlayOwners += 1
   if (dragOverlayOwners > 1) return
-  document.documentElement.setAttribute(PANEL_RESIZING_ATTRIBUTE, "true")
+  holdResizing()
   const el = document.createElement("div")
   el.setAttribute("data-slot", DRAG_OVERLAY_SLOT)
   // Decorative and non-interactive as far as assistive tech is concerned: it
@@ -58,7 +73,29 @@ export function releaseDragOverlay(): void {
   document
     .querySelector(`[data-slot="${DRAG_OVERLAY_SLOT}"]`)
     ?.remove()
-  document.documentElement.removeAttribute(PANEL_RESIZING_ATTRIBUTE)
+  releaseResizing()
+}
+
+export function armPanelDrag(startX: number): {
+  move: (x: number) => void
+  release: () => void
+} {
+  holdResizing()
+  let overlaid = false
+  let released = false
+  return {
+    move: (x) => {
+      if (overlaid || released || Math.abs(x - startX) < DRAG_SLOP) return
+      overlaid = true
+      acquireDragOverlay()
+    },
+    release: () => {
+      if (released) return
+      released = true
+      if (overlaid) releaseDragOverlay()
+      releaseResizing()
+    },
+  }
 }
 
 export function panelDragInProgress(): boolean {

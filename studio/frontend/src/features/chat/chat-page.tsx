@@ -46,10 +46,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  acquireDragOverlay,
-  releaseDragOverlay,
-} from "@/components/ui/panel-drag-overlay";
+import { armPanelDrag } from "@/components/ui/panel-drag-overlay";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -925,22 +922,23 @@ const SingleContent = memo(function SingleContent({
           disabled={!artifactLayoutActive || browserFullView}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
-            acquireDragOverlay();
+            const drag = armPanelDrag(event.clientX);
             const unpin = pinBrowserPage(event.currentTarget);
             const release = () => {
               window.removeEventListener("pointerup", release);
               window.removeEventListener("pointercancel", release);
-              window.removeEventListener("pointermove", released);
-              releaseDragOverlay();
+              window.removeEventListener("pointermove", moved);
+              drag.release();
               unpin();
               rememberArtifactPanelWidth();
             };
-            const released = (move: PointerEvent) => {
+            const moved = (move: PointerEvent) => {
               if (move.buttons === 0) release();
+              else drag.move(move.clientX);
             };
             window.addEventListener("pointerup", release);
             window.addEventListener("pointercancel", release);
-            window.addEventListener("pointermove", released);
+            window.addEventListener("pointermove", moved);
           }}
           onKeyUp={rememberArtifactPanelWidth}
           className={cn(
