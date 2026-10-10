@@ -63,6 +63,7 @@ from .diffusion_comfy_quant import (
     load_comfy_quant_transformer,
     refuse_comfy_quant,
 )
+from .diffusion_single_file_trust import assert_safetensors_file, single_file_load_allowed
 from .diffusion_prequant import scoped_local_files_only
 from .video_moe_pair import moe_expert_of, moe_partner_filename, moe_pick_pairs
 from .diffusion_cache import (
@@ -164,6 +165,7 @@ from .diffusion_transformer_quant import (
     TQ_AUTO,
     TQ_FP8,
     TQ_INT8,
+    TQ_NVFP4,
     dense_transformer_supported,
     dense_transformer_unsupported_reason,
     explain_unusable_scheme,
@@ -1786,33 +1788,65 @@ def _pipeline_device_mib(pipe: Any, ordinal: Optional[int] = None) -> int:
     return total // (1024 * 1024)
 
 
+def _auto_seed_yields_to_resident_bf16(scheme: Optional[str], requested: Optional[str]) -> bool:
+    """Whether an AUTO seed of ``scheme`` is bound by "auto keeps a resident bf16 DiT".
+
+    nvfp4 is exempt: it reaches auto only through a gated family preference (``_FAMILY_AUTO_PREFER``) that is
+    measured to be worth taking on a card that holds bf16. An explicit scheme is a request, honored as asked."""
+    if scheme is None or scheme == DENOISER_SEED_DECLINED or scheme == TQ_NVFP4:
+        return False
+    return requested is None or normalize_transformer_quant(requested) == TQ_AUTO
+
+
+def _auto_keeps_resident_bf16(plan: Any, target: Any) -> bool:
+    """The bf16 plan keeps the DiT resident on a measured budget, so auto runs bf16 (int8 fails the LPIPS bar there)."""
+    if plan is None or not plan_keeps_transformer_resident(plan):
+        return False
+    estimates = getattr(plan, "estimates", None) or {}
+    # An unmeasured budget also plans "none" without proving a fit.
+    return (
+        estimates.get("safe_device_budget_mib") is not None
+        and estimates.get("resident_required_mib") is not None
+        and bool(dense_transformer_supported(target))
+    )
+
+
 def _video_seed_stays_resident(
     fam: Any,
     *,
     target: Any,
-    scheme: str,
+    scheme: Optional[str],
     memory_mode: Optional[str],
     text_encoder_quant: Optional[str],
     base_repo: Optional[str],
     reclaimable_mib: int = 0,
 ) -> bool:
-    """True when an artifact-sized plan keeps the denoiser resident (text encoders may stream)."""
+    """True when an artifact-sized plan keeps the denoiser resident (text encoders may stream).
+
+    ``scheme=None`` sizes the released bf16 DiT instead, and then also requires a measured budget (see
+    ``_auto_keeps_resident_bf16``)."""
     components = getattr(fam, "bf16_components_gb", None)
     if not components:
-        return True
-    measured = video_family_prequant_resident_gb(fam, scheme)
-    factor = _QUANT_STEADY_FACTOR.get(scheme)
-    if measured:
-        denoiser_gb = float(measured)
-    elif factor is not None:
-        denoiser_gb = components[0] * factor
-    else:
-        return True
+        return scheme is not None
     import torch
+
+    dtype = getattr(target, "dtype", None)
+    if scheme is None:
+        denoiser_gb = components[0] * (
+            2.0 if getattr(target, "device", None) != "cpu" and dtype is torch.float32 else 1.0
+        )
+    else:
+        measured = video_family_prequant_resident_gb(fam, scheme)
+        factor = _QUANT_STEADY_FACTOR.get(scheme)
+        if measured:
+            denoiser_gb = float(measured)
+        elif factor is not None:
+            denoiser_gb = components[0] * factor
+        else:
+            return True
 
     from .diffusion_te_prequant import te_prequant_budget_scale
 
-    dtype = getattr(target, "dtype", None)
     dtype_scale = (
         2.0 if getattr(target, "device", None) != "cpu" and dtype is torch.float32 else 1.0
     )
@@ -1846,6 +1880,8 @@ def _video_seed_stays_resident(
         text_encoder_dense_mib = int(text_encoder_gb * mib_per_gb),
         requested_mode = normalize_memory_mode(memory_mode),
     )
+    if scheme is None:
+        return _auto_keeps_resident_bf16(planned, target)
     return plan_keeps_transformer_resident(planned)
 
 
@@ -2774,10 +2810,14 @@ class VideoBackend:
                         "MiniMax-H3 needs the Diffusers revision bundled with this Unsloth "
                         "version. Reinstall Unsloth dependencies and retry."
                     )
-        if kind != "gguf" and not _is_trusted_video_repo(repo_id):
+        # A lone .safetensors file is trusted per file, from any repo (diffusion_single_file_trust).
+        if kind != "gguf" and not single_file_load_allowed(
+            _is_trusted_video_repo(repo_id), kind, gguf_filename
+        ):
             raise ValueError(
-                f"Non-GGUF video loads are limited to unsloth/* repos, the official "
-                f"family base repos, and local paths; '{repo_id}' is neither."
+                f"Non-GGUF video loads from '{repo_id}' are limited to a single .safetensors "
+                f"checkpoint; full pipelines and other weight formats load only from unsloth/* "
+                f"repos, the official family base repos, and local paths."
             )
         # Companions load with from_pretrained, so a base repo is held to the non-GGUF bar: a GGUF pick must not smuggle
         # in a remote base.
@@ -4276,6 +4316,23 @@ class VideoBackend:
                 if scheme is None:
                     return None
                 resident = self._state
+                reclaimable = _pipeline_device_mib(
+                    getattr(resident, "pipe", None),
+                    ordinal = _target_ordinal(target),
+                )
+                if _auto_seed_yields_to_resident_bf16(
+                    scheme, transformer_quant
+                ) and _video_seed_stays_resident(
+                    fam,
+                    target = target,
+                    scheme = None,
+                    memory_mode = memory_mode,
+                    text_encoder_quant = text_encoder_quant,
+                    base_repo = base,
+                    reclaimable_mib = reclaimable,
+                ):
+                    # auto keeps a resident bf16 DiT, so the dense shards are what this load runs.
+                    return None
                 if not _video_seed_stays_resident(
                     fam,
                     target = target,
@@ -5805,6 +5862,8 @@ class VideoBackend:
                         repo_id, gguf_filename, hf_token, local_files_only = local_files_only
                     )
                 )
+                if not _is_trusted_video_repo(repo_id):
+                    assert_safetensors_file(comfy_checkpoint)
             return self._load_h3_modular_pipeline(
                 diffusers = diffusers,
                 torch = torch,
@@ -5883,6 +5942,10 @@ class VideoBackend:
             checkpoint_path = self._resolve_checkpoint_path(
                 repo_id, gguf_filename, hf_token, local_files_only = local_files_only
             )
+            # Admitted per file from an untrusted repo: prove each file is a safetensors container before any probe.
+            untrusted_single_file = kind == "single_file" and not _is_trusted_video_repo(repo_id)
+            if untrusted_single_file:
+                assert_safetensors_file(checkpoint_path)
             if fam.name == "ltx-2":
                 from .video_ltx2 import ltx23_variant_identifier
                 variant_id = ltx23_variant_identifier(checkpoint_path)
@@ -5899,6 +5962,8 @@ class VideoBackend:
                 """Resident MiB of one checkpoint file's DiT and its ComfyUI quant scan (None: a plain file)."""
                 scan = None
                 mib: Optional[int] = None
+                if untrusted_single_file:
+                    assert_safetensors_file(path)
                 size_mib = file_size_mib(str(path))
                 if kind == "single_file":
                     scan = refuse_comfy_quant(str(path))
@@ -6156,6 +6221,18 @@ class VideoBackend:
                 "card, so the hosted checkpoint is not seeded",
                 denoiser_seed_scheme,
                 _video_plan_label(plan),
+            )
+            denoiser_seed_scheme = None
+            denoiser_seed_gb = None
+            plan, bf16_plan, quant_replanned = _plan_for_te_scale(te_scale, log = False)
+        if _auto_seed_yields_to_resident_bf16(
+            denoiser_seed_scheme, transformer_quant
+        ) and _auto_keeps_resident_bf16(_plan_for_te_scale(te_scale, log = False)[1], target):
+            # Auto keeps a resident bf16 DiT; seeding would change auto's precision wherever bf16 fits.
+            logger.info(
+                "video.denoiser_prequant: auto keeps the bf16 DiT (it fits resident), so the hosted "
+                "%s checkpoint is not seeded",
+                denoiser_seed_scheme,
             )
             denoiser_seed_scheme = None
             denoiser_seed_gb = None
@@ -6556,11 +6633,7 @@ class VideoBackend:
             and normalize_transformer_quant(transformer_quant) == TQ_AUTO
             and not quant_replanned
             and not denoiser_injected
-            and plan_keeps_transformer_resident(plan)
-            # An unmeasured budget also plans "none" without proving a fit.
-            and plan.estimates.get("safe_device_budget_mib") is not None
-            and plan.estimates.get("resident_required_mib") is not None
-            and dense_transformer_supported(target)
+            and _auto_keeps_resident_bf16(plan, target)
         ):
             logger.info("video.transformer_quant: auto keeps the bf16 DiT (it fits resident)")
             transformer_quant = "off"

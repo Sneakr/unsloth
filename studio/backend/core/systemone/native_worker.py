@@ -260,9 +260,28 @@ def _pick_device(binary: str, env: dict[str, str]) -> str:
             free = LlamaCppBackend._get_gpu_free_memory(binary, for_llama_server = True)
         except Exception:
             free = []
-        # Same order as --list-devices only when both list every visible GPU.
-        if len(free) == len(devices):
-            return devices[max(range(len(free)), key = lambda i: free[i][1])]
+        # llama.cpp lists CUDA / ROCm GPUs in mask order; free rows come sorted by physical index.
+        # Vulkan ordinals ignore these masks, and HIP on top of ROCR composes, so both keep physical order.
+        by_index = dict(free)
+        mask = None
+        if all(d.startswith("CUDA") for d in devices):
+            mask = env.get("CUDA_VISIBLE_DEVICES")
+        elif all(d.startswith("ROCm") for d in devices):
+            rocr = env.get("ROCR_VISIBLE_DEVICES")
+            # HIP falls back to CUDA_VISIBLE_DEVICES when its own mask is unset.
+            hip = env.get("HIP_VISIBLE_DEVICES") or env.get("CUDA_VISIBLE_DEVICES")
+            mask = None if rocr and hip else rocr or hip
+        try:
+            order = [int(x) for x in (mask or "").split(",") if x.strip()]
+        except ValueError:
+            order = []
+            if mask and all(d.startswith("CUDA") for d in devices):
+                from utils.hardware import nvidia
+                order = nvidia.resolve_uuid_mask(mask.strip()) or []
+        if len(order) != len(devices):
+            order = sorted(by_index)
+        if len(order) == len(devices) and all(i in by_index for i in order):
+            return devices[max(range(len(order)), key = lambda i: by_index[order[i]])]
     return devices[0]
 
 
@@ -295,7 +314,7 @@ class NativeClefAgent:
         cancelled: Callable[[], bool] | None = None,
         clef_answers: bool = True,
     ):
-        from core.inference.llama_cpp import LlamaCppBackend
+        from core.inference.llama_cpp import LlamaCppBackend, _llama_server_key_via_env
         from utils.process_lifetime import (
             adopt_pid,
             child_popen_kwargs,
@@ -333,7 +352,13 @@ class NativeClefAgent:
         self._log_path: Path | None = None
         if is_process_shutting_down():
             raise NativeError("Studio is shutting down; llama.cpp was not started.")
-        self._key_file = _write_key(self._key)
+        if _llama_server_key_via_env():
+            key_argv = []
+            env["LLAMA_API_KEY"] = self._key
+        else:
+            self._key_file = _write_key(self._key)
+            # Through a file, not argv: a command line is readable by every process of this user.
+            key_argv = ["--api-key-file", str(self._key_file)]
         self.command = [
             binary,
             "-m",
@@ -345,9 +370,7 @@ class NativeClefAgent:
             "127.0.0.1",
             "--port",
             str(self.port),
-            # Through a file, not argv: a command line is readable by every process of this user.
-            "--api-key-file",
-            str(self._key_file),
+            *key_argv,
             "--parallel",
             "1",
             # A decision reads every token in one ubatch: -ub bounds the longest state served.

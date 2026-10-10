@@ -192,6 +192,7 @@ export const sv = {
     downloadPrompt: {
       title: "Hämta den här filen?",
       description: "{host} vill spara {name} på din dator.",
+      dangerous: "Filer som den här kan köra program på din dator. Ladda bara ned den om du litar på {host}.",
       remember: "Kom ihåg till nästa gång",
       cancel: "Avbryt",
       download: "Hämta",
@@ -275,6 +276,43 @@ export const sv = {
       mobile: "Mobil",
       tablet: "Surfplatta",
       close: "Dölj enhetsverktygsfält",
+    },
+    downloads: {
+      title: "Hämtade filer",
+      inProgressLabel: "Hämtar",
+      inProgress: "Hämtar…",
+      complete: "Hämtningen är klar",
+      failed: "Hämtningen misslyckades",
+      downloaded: "Hämtad",
+      missing: "Filen har flyttats eller tagits bort",
+      open: "Öppna",
+      openFailed: "Det gick inte att öppna {name}.",
+      copyLink: "Kopiera hämtningslänk",
+      showAll: "Visa alla",
+      savePage: "Spara sidan som…",
+    },
+    video: {
+      play: "Spela upp",
+      pause: "Pausa",
+      seek: "Spola",
+      volume: "Volym",
+      mute: "Stäng av ljud",
+      unmute: "Slå på ljud",
+      more: "Fler uppspelningsalternativ",
+      speed: "Uppspelningshastighet",
+      normalSpeed: "Normal",
+      loop: "Upprepa",
+      pictureInPicture: "Bild-i-bild",
+      fullscreen: "Helskärm",
+      copyFrame: "Kopiera bildruta",
+      frameCopied: "Bildrutan har kopierats",
+      copyFrameFailed: "Det gick inte att kopiera bildrutan.",
+      copyName: "Kopiera filnamn",
+      nameCopied: "Filnamnet har kopierats",
+      copyOptions: "Kopieringsalternativ",
+      open: "Öppna",
+      openOptions: "Alternativ för att öppna",
+      saveAs: "Spara som…",
     },
     file: {
       openIn: "Öppna i",
@@ -390,6 +428,7 @@ export const sv = {
       downloading: "Hämtar {name}",
       downloaded: "{name} sparades i Hämtade filer",
       downloadFailed: "Det gick inte att hämta {name}",
+      notMarked: "{name} sparades men kunde inte markeras som nedladdad från internet, så systemet varnar inte innan den öppnas.",
       blocked:
         "Den här adressen kan inte öppnas i webbläsarpanelen. Den öppnar bara offentliga webbplatser.",
       clearDataSettingDescription:
@@ -434,17 +473,14 @@ export const sv = {
     rollback: "Återställ föregående installation",
     installTitle: "Installera {engine}",
     installAndLoad: "Installera och läs in",
-    confirm:
-      "Installera {engine} {version}? Denna valfria hämtning kan använda flera gigabyte. Exakt hur mycket mer som hämtas och hur mycket diskutrymme som används är inte känt. Kompatibla cachade paket och modellfiler återanvänds.",
-    confirmSized:
-      "Installera {engine} {version}? Denna valfria hämtning är ungefär {size}. Paket som Studio redan har, inklusive PyTorch när versionerna matchar, återanvänds i stället för att hämtas igen.",
+    confirm: "Installera {engine} {version}? Detta kan hämta flera GB.",
+    confirmSized: "Installera {engine} {version}? Cirka {size} att hämta.",
     wslSetup:
-      "I Windows körs {engine} inuti WSL2 (Windows Subsystem for Linux). Studio aktiverar WSL2 och konfigurerar en egen privat Ubuntu-miljö för motorer; dina befintliga Linux-distributioner påverkas inte. Windows visar en administratörsfråga (UAC) och kan be dig starta om innan installationen kan slutföras. Ingenting ändras förrän du klickar på Installera.",
+      "I Windows körs {engine} i en privat WSL2-miljö som Studio konfigurerar. Räkna med en administratörsfråga och eventuellt en omstart.",
     wslReady: "I Windows körs {engine} inuti Studios privata WSL2-miljö.",
     wslRestart:
       "Starta om Windows för att slutföra aktiveringen av WSL2 och klicka sedan på Installera igen.",
-    background:
-      "Installationen körs i bakgrunden. Om du tar bort motorn behålls dina hämtade modeller.",
+    background: "Installeras i bakgrunden.",
     failed:
       "Installationen av motorn misslyckades. Försök igen eller använd standardmotorn.",
     details: "Tekniska detaljer",
@@ -599,6 +635,7 @@ export const sv = {
     },
   },
   common: {
+    duplicate: "Duplicera",
     cancel: "Avbryt",
     close: "Stäng",
     delete: "Ta bort",
@@ -1270,6 +1307,8 @@ export const sv = {
       title: "Sandlåda",
       description:
         "Om verktygsanrop för Python och Terminal körs i en OS-sandlåda på den här datorn.",
+      docs: "Dokumentation",
+      docsLabel: "Öppna dokumentationen för sandlådan",
       toolsSection: "Den här datorn",
       refresh: "Uppdatera",
       python: "Python",
@@ -1304,6 +1343,10 @@ export const sv = {
       grantsDescription:
         "Behåller läsåtkomst till Unsloths egna körmiljömappar mellan anrop. När det är av startar varje anrop några sekunder långsammare.",
       lockedGrants: "Inställt av UNSLOTH_MXC_PERSISTENT_READ_GRANTS",
+      memoryLabel: "Minnesgräns",
+      memoryDescription: "Mest minne som ett Python- eller Terminal-anrop i sandlådan kan reservera. Gäller från nästa anrop. Standard är {defaultSize} GB.",
+      memoryLocked: "Inställt av UNSLOTH_STUDIO_SANDBOX_AS_GB",
+      memoryInvalid: "Ange ett heltal från {min} till {max}.",
       restored: "Tog bort åtkomst från {count} mappar.",
       hostPrepLabel: "Administratörskonfiguration",
       prepPrepared: "Klar",
@@ -1776,6 +1819,17 @@ export const sv = {
         showAudioCppUpdates: "Aviseringar om audio.cpp-uppdateringar",
         showAudioCppUpdatesDescription:
           "Avisera när audio.cpp-körmiljön behöver uppdateras för ljudsidorna. Stäng av om du aldrig använder ljud.",
+        showUnslothUpdates: "Uppdateringsaviseringar för Unsloth",
+        showUnslothUpdatesDescription:
+          "Meddela när en nyare version av Unsloth finns att installera.",
+        frequency: {
+          always: "Alltid",
+          daily: "En gång om dagen",
+          weekly: "En gång i veckan",
+          biweekly: "Varannan vecka",
+          monthly: "En gång i månaden",
+          off: "Av",
+        },
       },
       startup: {
         sectionTitle: "Start",
@@ -2144,6 +2198,8 @@ export const sv = {
         label: "Visningsspråk",
         description: "Språket som används av Unsloth.",
         autoDetect: "Identifiera automatiskt",
+        spellCheck: "Stavningskontroll",
+        spellCheckDescription: "Stryk under felstavade ord medan du skriver.",
       },
       layout: {
         title: "Layout",
@@ -2210,6 +2266,10 @@ export const sv = {
           "PyTorch är en version endast för CPU ({version}), så GPU:erna nedan kan inte användas. Reparera installationen för att återställa GPU-stödet.",
         mismatchUnavailable:
           "PyTorch ({version}) kan inte initiera GPU:erna nedan, så de kan inte användas. Kontrollera GPU-drivrutinen eller reparera installationen.",
+        driverIdleEvict:
+          "AMD-drivrutinen {version} har en känd bugg som kan frysa Windows när ett AMD-grafikkort står inaktivt, oftast med fler än ett grafikkort. Uppdatera till Adrenalin 26.9.2 eller senare.",
+        driverIdleEvictDetails: "Detaljer",
+        dismissNotice: "Stäng",
         unusableDevice: "oanvändbar",
         unknownDevice: "Okänd GPU",
         deviceWithIndex: "GPU {index}",
@@ -2434,6 +2494,7 @@ export const sv = {
         "Det gick inte att läsa in alla kvantiseringar. Kommandot använder det tillgängliga modellvärdet.",
       generatedCommand: "Genererat kommando",
       docs: "Dokumentation",
+      docsLabel: "Öppna dokumentationen för unsloth start",
       agentDocs: "Öppna installationsdokumentation för {agent}",
       copyGeneratedCommand: "Kopiera genererat kommando",
       automaticSettingsNote:
@@ -2995,6 +3056,8 @@ export const sv = {
       revoking: "Återkallar ...",
       decisionApi: {
         title: "Decision API",
+        docs: "Dokumentation",
+        docsLabel: "Öppna dokumentationen för Decision API",
         description:
           "Besvara ja/nej-frågor, flervalsfrågor och poängfrågor om text med en modell på denna dator eller en beslutsmodell från Anslutningar. Fungerar med TypeSafe SDK.",
         enable: "Hantera begäranden",
@@ -3015,6 +3078,16 @@ export const sv = {
           "GPU svarar snabbare men håller sitt minne reserverat tills omstart.",
         deviceCpu: "CPU",
         deviceGpu: "GPU",
+        backend: "Körmiljö",
+        backendAuto: "Automatisk",
+        backendDescription:
+          "Automatisk kör Clef via llama.cpp när modellen har en GGUF-version och faller annars tillbaka på PyTorch. llama.cpp läser också bilder.",
+        backendDescriptionMlx:
+          "Automatisk kör Clef via MLX på Apple Silicon och via llama.cpp när bara modellens GGUF-version är laddad eller nedladdad. MLX läser bilder bara för Clef-modeller; llama.cpp läser också bilder.",
+        backendStatus: "Körmiljö: {backend}",
+        backendNone: "inte tillgänglig",
+        mediaImages: "Läser text och bilder.",
+        mediaText: "Läser bara text.",
         checking: "Kontrollerar …",
         notDownloaded: "Inte hämtad · {size}",
         downloading: "Hämtar …",
@@ -3040,6 +3113,19 @@ export const sv = {
         addConnection:
           "Lägg till TypeSafe, Liquid AI eller OpenRouter under Anslutningar för att använda en värdbaserad beslutsmodell.",
         openConnections: "Öppna Anslutningar",
+      },
+      mcp: {
+        title: "Agentåtkomst (MCP)",
+        description: "Låt kodagenter som Claude Code och Codex använda Unsloth via MCP. Agenter loggar in med en åtkomsttoken från den här sidan.",
+        enable: "Tillåt agentanslutningar",
+        enableDescription: "Betjänar /mcp/ för förfrågningar som har en åtkomsttoken för Unsloth.",
+        lockedByEnv: "Angiven av {name}.",
+        loadError: "Det gick inte att läsa in inställningarna för agentåtkomst.",
+        saveError: "Det gick inte att spara inställningen för agentåtkomst.",
+        agent: "Agent",
+        exportKeyHint: "Sätt {name} till en åtkomsttoken från den här sidan innan du startar agenten.",
+        configFileHint: "Lägg till det här i {path}.",
+        keywords: "mcp model context protocol agents claude codex tools agenter agent verktyg modellkontextprotokoll",
       },
     },
     about: {
@@ -3157,6 +3243,11 @@ export const sv = {
       methodLabel: "Metod",
       methodTooltip:
         "Hur modellen tränas. LoRA och QLoRA uppdaterar små adaptrar i stället för varje vikt.",
+      trainAsLabel: "Träna som",
+      trainAsTooltip:
+        "En språkmodell skriver text. En beslutsmodell väljer ett av alternativen du ger den, med en sannolikhet, och körs i Decision API.",
+      trainAsLanguage: "Språkmodell",
+      trainAsDecision: "Beslutsmodell",
       datasetLabel: "Datauppsättning",
       datasetTooltip: "Träningsdata som används för att finjustera modellen.",
       hfTokenDescription:
@@ -3590,6 +3681,31 @@ export const sv = {
         "Andel av totala träningssteg mellan utvärderingar (0–1). Ange 0 för att inaktivera utvärdering. Exempel: 0,01 = utvärdera var 1 % av stegen.",
       seed: "Slumptalets startvärde",
       seedTooltip: "Slumptalets startvärde för reproducerbarhet.",
+      offloadLayers: "Avlasta lager",
+      offloadLayersTooltip: "Håll avkodarlager i systemminnet och strömma vart och ett till GPU:n precis innan det körs, så att en modell som är större än ditt VRAM kan tränas med LoRA. Auto avlastar så få som behövs; ett antal avlastar exakt så många. Kräver gradient checkpointing.",
+      offloadOff: "Av",
+      offloadAuto: "Auto",
+      offloadCount: "Antal",
+      offloadVramBudget: "VRAM-budget (GiB)",
+      offloadVramBudgetTooltip: "Det mesta VRAM den här körningen får använda. Auto avlastar tillräckligt många lager för att hålla sig under det, och två körningar kan dela ett kort genom att ta varsin del. Tomt använder hela kortet.",
+      offloadVramBudgetGpu: "VRAM-budget för GPU {index} (GiB)",
+      offloadWholeCard: "hela kortet",
+      prefetchDepth: "Förhämtningsdjup",
+      prefetchDepthTooltip: "Hur många avlastade lager som kopieras i förväg före det som körs. Auto börjar på 1 och behåller en djupare pool bara så länge den mätbart minskar väntan på kopior.",
+      offloadPanelTitle: "Avlastade lager",
+      offloadPanelCard: "GPU {index}",
+      offloadPanelCardUnknown: "Okänt kort",
+      offloadPanelGpu: "På GPU",
+      offloadPanelHost: "I systemminnet",
+      offloadPanelCopying: "Kopieras",
+      offloadPanelSwapped: "avlastade",
+      offloadPanelStall: "väntan på kopior",
+      offloadPanelCopy: "kopiering per lager",
+      offloadPanelCompute: "beräkning per lager",
+      offloadPanelVram: "VRAM",
+      offloadPanelDepth: "förhämtningsdjup",
+      offloadPanelPinned: "låst",
+      offloadPanelSweepNote: "Det rörliga fönstret visar i vilken ordning lagren hämtas, saktat ner för att synas; siffrorna är uppmätta på det senaste steget.",
       gradCheckpoint: "Gradientkontrollpunkt",
       gradCheckpointTooltip:
         "Byt beräkningskraft mot minne genom att beräkna aktiveringar igen.",
@@ -3600,6 +3716,11 @@ export const sv = {
       readMore: "Läs mer",
     },
     training: {
+      duplicateFailed: "Det gick inte att duplicera körningen",
+      duplicateDraftChanged:
+        "Träningsinställningarna ändrades under inläsningen. Försök duplicera igen.",
+      duplicateNoModel:
+        "Den här körningen har ingen sparad modellkonfiguration.",
       startTraining: "Starta träning",
       starting: "Startar ...",
       loadingModel: "Läser in modell ...",
@@ -3940,6 +4061,13 @@ export const sv = {
     discard: "Ignorera",
     mentions: "Färdigheter",
     manage: "Hantera färdigheter",
+    bulkActions: "Färdighetsåtgärder",
+    enableAll: "Aktivera alla",
+    disableAll: "Inaktivera alla",
+    resetAll: "Återställ standard",
+    resetTitle: "Återställa alla färdigheter?",
+    resetDescription: "Varje färdighet återgår till hur en ny installation har den: dina färdigheter och Claude-färdigheter på, medföljande färdigheter av. Dina val av på och av rensas.",
+    reset: "Återställ",
   },
   library: {
     tabs: {
@@ -4127,6 +4255,7 @@ export const sv = {
       chatAboutThis: "Chatta om detta",
       chatWithModel: "Chatta med den här modellen",
       addToFavorites: "Lägg till i Favoriter",
+      regenerateTitle: "Generera om titel",
       removeFromFavorites: "Ta bort från Favoriter",
       download: "Hämta",
       addToFolder: "Lägg till i mapp",
@@ -4346,6 +4475,18 @@ export const sv = {
       readVideoFailed: "Det gick inte att läsa videon ({status}).",
       openFileFailed: "Det gick inte att öppna filen",
     },
+  },
+  exportDecision: {
+    title: "Beslutsmodell",
+    description:
+      "{layout}-beslutsmodeller exporteras till GGUF för llama.cpp:s beslutsserver. Välj en eller flera kvantiseringar.",
+    adapterNote: "Den här kontrollpunkten innehåller LoRA-adaptrar; de slås samman före konverteringen.",
+    notEligibleTitle: "GGUF-export är inte tillgänglig",
+    ggufOnly: "Beslutsmodeller exporteras bara till GGUF",
+    existing: "Redan exporterad: {quantizations}",
+    outputNote: "GGUF-filer sparas i körningsmappen: {path}",
+    methodLabel: "GGUF för beslutsmodell",
+    outputLabel: "Besluts-GGUF ({quantizations})",
   },
   decisions: {
     title: "Testa ett beslut",

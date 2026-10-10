@@ -31,7 +31,6 @@ import {
 import {
   clearReasoningRound,
   foldIsActive,
-  isRenderableRenderHtmlToolPart,
   resolveReasoningGroupDuration,
   resolveReasoningOpen,
   setReasoningRoundOpen,
@@ -81,7 +80,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { shallow } from "zustand/shallow";
+import { partsHaveRenderableRenderHtmlTool } from "@/components/assistant-ui/message-derived";
+import { useMessageMemo } from "@/components/assistant-ui/use-message-memo";
 const ANIMATION_DURATION = 200;
 
 function selectionIntersectsElement(
@@ -373,6 +374,7 @@ function ReasoningCopyButton({
 
   const aui = useAui();
 
+  // Read on click: as a selector it joined all the reasoning on every store write.
   const handleCopy = useCallback(async () => {
     const reasoningText = aui
       .message()
@@ -527,10 +529,11 @@ const ReasoningGroupImpl: ReasoningGroupComponent = (props) => {
   const foldToolActivity = useChatPreferencesStore((state) =>
     foldIsActive(state.foldToolActivityIntoThinking, state.toolVisibility),
   );
-  const folded = useAuiState(
-    ({ message }) =>
+  const folded = useMessageMemo(
+    (message) =>
       foldToolActivity &&
       isFoldedReasoningGroup(message.parts, props.startIndex),
+    [foldToolActivity, props.startIndex],
   );
   if (folded) {
     return <FoldedReasoningRound {...props} />;
@@ -558,10 +561,13 @@ const FoldedReasoningRound: ReasoningGroupComponent = ({
   endIndex,
 }) => {
   const messageId = useAuiState(({ message }) => message.id);
-  const roundKey = useAuiState(({ message }) => {
-    const lead = leadReasoningEnd(message.parts, startIndex);
-    return lead === null ? null : reasoningRoundKey(message.id, lead);
-  });
+  const roundKey = useMessageMemo(
+    (message) => {
+      const lead = leadReasoningEnd(message.parts, startIndex);
+      return lead === null ? null : reasoningRoundKey(message.id, lead);
+    },
+    [startIndex],
+  );
   const open = useReasoningRoundStore(
     (state) => roundKey !== null && (state.open[roundKey] ?? false),
   );
@@ -575,24 +581,26 @@ const FoldedReasoningRound: ReasoningGroupComponent = ({
     return true;
   });
   const messageHasRenderableRenderHtmlTool = useAuiState(({ message }) =>
-    message.parts.some(isRenderableRenderHtmlToolPart),
+    partsHaveRenderableRenderHtmlTool(message.parts),
   );
   const reasoningContentRef = useRef<HTMLDivElement>(null);
-  const reasoningDocuments = useAuiState(
-    useShallow(({ message }) =>
+  const reasoningDocuments = useMessageMemo(
+    (message) =>
       message.parts
         .slice(startIndex, endIndex + 1)
         .filter((part) => part.type === "reasoning")
         .map((part) => ("text" in part ? (part as { text: string }).text : "")),
-    ),
+    [startIndex, endIndex],
+    shallow,
   );
   const transcript = useReasoningTranscriptMode({
     messageId,
     reasoningDocuments,
     reasoningContentRef,
   });
-  const closesTrace = useAuiState(({ message }) =>
-    endsFoldedSpan(message.parts, endIndex),
+  const closesTrace = useMessageMemo(
+    (message) => endsFoldedSpan(message.parts, endIndex),
+    [endIndex],
   );
   // Hidden, not unmounted, so the text keeps streaming in while the lead is closed.
   return (
@@ -623,9 +631,10 @@ const ReasoningGroupBlock = ({
   foldTurn,
 }: ComponentProps<ReasoningGroupComponent> & { foldTurn: boolean }) => {
   // The lead of a folded span: its first Thinking block.
-  const foldLead = useAuiState(
-    ({ message }) =>
+  const foldLead = useMessageMemo(
+    (message) =>
       foldTurn && leadReasoningEnd(message.parts, endIndex) === endIndex,
+    [foldTurn, endIndex],
   );
   const isReasoningStreaming = useAuiState(({ message }) => {
     if (message.status?.type !== "running") {
@@ -663,18 +672,19 @@ const ReasoningGroupBlock = ({
   const messageId = useAuiState(({ message }) => message.id);
 
   const messageHasRenderableRenderHtmlTool = useAuiState(({ message }) =>
-    message.parts.some(isRenderableRenderHtmlToolPart),
+    partsHaveRenderableRenderHtmlTool(message.parts),
   );
 
   const reasoningContentRef = useRef<HTMLDivElement>(null);
 
-  const reasoningDocuments = useAuiState(
-    useShallow(({ message }) =>
+  const reasoningDocuments = useMessageMemo(
+    (message) =>
       message.parts
         .slice(startIndex, endIndex + 1)
         .filter((part) => part.type === "reasoning")
         .map((part) => ("text" in part ? (part as { text: string }).text : "")),
-    ),
+    [startIndex, endIndex],
+    shallow,
   );
   const transcript = useReasoningTranscriptMode({
     messageId,
@@ -682,17 +692,20 @@ const ReasoningGroupBlock = ({
     reasoningContentRef,
   });
 
-  const persistedDuration = useAuiState(({ message }) => {
-    const custom = message.metadata?.custom as
-      | Record<string, unknown>
-      | undefined;
-    if (foldLead) {
-      return foldedTurnDuration(message.parts, endIndex, (parts, start) =>
-        resolveReasoningGroupDuration(parts, start, custom),
-      );
-    }
-    return resolveReasoningGroupDuration(message.parts, startIndex, custom);
-  });
+  const persistedDuration = useMessageMemo(
+    (message) => {
+      const custom = message.metadata?.custom as
+        | Record<string, unknown>
+        | undefined;
+      if (foldLead) {
+        return foldedTurnDuration(message.parts, endIndex, (parts, start) =>
+          resolveReasoningGroupDuration(parts, start, custom),
+        );
+      }
+      return resolveReasoningGroupDuration(message.parts, startIndex, custom);
+    },
+    [foldLead, startIndex, endIndex],
+  );
 
   const visibility = useChatPreferencesStore(
     (state) => state.thinkingVisibility,
@@ -743,22 +756,27 @@ const ReasoningGroupBlock = ({
   // its header. A layout effect, so the folded parts settle before the frame the user sees.
   const roundKey = reasoningRoundKey(messageId, endIndex);
   const toolConfirmations = useChatRuntimeStore((s) => s.toolConfirmations);
-  const foldedToolCount = useAuiState(({ message }) =>
-    foldLead
-      ? countFoldedToolParts(message.parts, endIndex, (start, end) =>
-          toolRunIsExempt(message.parts, start, end, toolConfirmations),
-        )
-      : 0,
+  const foldedToolCount = useMessageMemo(
+    (message) =>
+      foldLead
+        ? countFoldedToolParts(message.parts, endIndex, (start, end) =>
+            toolRunIsExempt(message.parts, start, end, toolConfirmations),
+          )
+        : 0,
+    [foldLead, endIndex, toolConfirmations],
   );
   // Copy reaches the rounds folded in here too: they have no Copy of their own.
-  const copyEndIndex = useAuiState(({ message }) =>
-    foldLead ? foldEnd(message.parts, endIndex) - 1 : endIndex,
+  const copyEndIndex = useMessageMemo(
+    (message) => (foldLead ? foldEnd(message.parts, endIndex) - 1 : endIndex),
+    [foldLead, endIndex],
   );
   // The answer follows this block directly, with nothing folded in between.
-  const closesTrace = useAuiState(({ message }) =>
-    foldLead
-      ? endsFoldedSpan(message.parts, endIndex)
-      : message.parts[endIndex + 1]?.type === "text",
+  const closesTrace = useMessageMemo(
+    (message) =>
+      foldLead
+        ? endsFoldedSpan(message.parts, endIndex)
+        : message.parts[endIndex + 1]?.type === "text",
+    [foldLead, endIndex],
   );
   useLayoutEffect(() => {
     if (!foldLead) return;

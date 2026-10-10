@@ -280,7 +280,7 @@ def test_no_mirror_is_a_companion_only_repo():
 # Vendor bases the catalog offers before their unsloth mirror exists on the Hub. A mirror row for a
 # repo that is not there would 404 every fetch it redirects, so the table cannot lead the upload;
 # this names the gap instead of letting the check below go red on every PR until it closes.
-_MIRRORS_NOT_YET_PUBLISHED: frozenset[str] = frozenset()
+_MIRRORS_NOT_YET_PUBLISHED: frozenset[str] = frozenset({"qwen/qwen-image-2.1-turbo"})
 
 
 def test_every_third_party_bf16_pipeline_the_catalog_offers_is_mirrored():
@@ -2854,6 +2854,85 @@ def test_generate_other_family_never_passes_cfg_trunc_ratio(fake_runtime, tmp_pa
     assert call["cfg_trunc_ratio"] is None
 
 
+_TURBO_GRID = [1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568]
+
+
+class _FakeFlowScheduler:
+    def __init__(self, **config):
+        self.config = dict(config)
+
+    @classmethod
+    def from_config(cls, config, **overrides):
+        return cls(**{**config, **overrides})
+
+
+class _FakeGridPipe(_FakePipe):
+    """A QwenImage21Pipeline on the pinned diffusers: takes ``sigmas``, but its config never holds ``sample_sigmas``
+    (an extra key there breaks DiffusionPipeline.components, so group offload fails and the load dies)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.config = {}
+        self.scheduler = _FakeFlowScheduler(
+            shift = 1.0, use_dynamic_shifting = False, shift_terminal = None
+        )
+
+    def __call__(
+        self,
+        *,
+        prompt = None,
+        sigmas = None,
+        callback_on_step_end = None,
+        **kwargs,
+    ):
+        self.last_kwargs = {"prompt": prompt, "sigmas": sigmas, **kwargs}
+        return types.SimpleNamespace(images = [_FakeImage()])
+
+
+class _FakeGridPipeline:
+    @classmethod
+    def from_pretrained(cls, base, **kwargs):
+        return _FakeGridPipe()
+
+
+def _load_grid_pipeline(backend, tmp_path, monkeypatch, **manifest):
+    import diffusers
+
+    monkeypatch.setattr(diffusers, "Lumina2Pipeline", _FakeGridPipeline, raising = False)
+    # Stand in for a family whose ComfyUI template sets a static shift.
+    monkeypatch.setattr("core.inference.diffusion.comfy_flow_shift_for", lambda *a, **k: 3.0)
+    _write_pipeline(tmp_path, "Lumina2Pipeline", **manifest)
+    backend.load_pipeline(str(tmp_path), family_override = "lumina-2")
+    return backend._state.pipe
+
+
+def test_checkpoint_sample_sigmas_drive_the_schedule(fake_runtime, tmp_path, monkeypatch):
+    # The pinned diffusers drops Turbo's model_index.json grid; the backend carries it and passes it to every render.
+    backend = DiffusionBackend()
+    pipe = _load_grid_pipeline(backend, tmp_path, monkeypatch, sample_sigmas = _TURBO_GRID)
+    assert "sample_sigmas" not in pipe.config
+    assert pipe.scheduler.config["shift"] == 1.0  # not rebuilt at the static shift
+
+    backend.generate(prompt = "a sloth", steps = 8, guidance = 1.0)
+    assert pipe.last_kwargs["sigmas"] == _TURBO_GRID
+    # Another step count follows the same curve: same endpoints, still decreasing.
+    backend.generate(prompt = "a sloth", steps = 4, guidance = 1.0)
+    four = pipe.last_kwargs["sigmas"]
+    assert len(four) == 4 and four[0] == _TURBO_GRID[0] and four[-1] == _TURBO_GRID[-1]
+    assert all(b < a for a, b in zip(four, four[1:]))
+
+
+def test_checkpoint_without_sample_sigmas_keeps_the_static_shift(
+    fake_runtime, tmp_path, monkeypatch
+):
+    # Qwen/Qwen-Image-2.1 and every other checkpoint: no grid, so the ComfyUI shift and the linear ramp stay as on main.
+    backend = DiffusionBackend()
+    pipe = _load_grid_pipeline(backend, tmp_path, monkeypatch)
+    assert pipe.scheduler.config["shift"] == 3.0
+    backend.generate(prompt = "a sloth", steps = 8, guidance = 1.0)
+    assert pipe.last_kwargs["sigmas"] is None
+
+
 def test_begin_load_rejects_concurrent(monkeypatch):
     backend = DiffusionBackend()
     # The worker resolves the base + downloads, both over the network; stub them so this is offline.
@@ -4220,9 +4299,15 @@ def test_validate_load_request(tmp_path):
         backend.validate_load_request(
             "unsloth/Z-Image-Turbo-bnb-4bit", gguf_filename = "q.gguf", model_kind = "pipeline"
         )
-    # A single-file safetensors load is also gated to unsloth/* repos.
+    # A single .safetensors file is trusted per file, from any repo; any other weight format there is still refused.
+    assert (
+        backend.validate_load_request("some-org/Z-Image", gguf_filename = "model.safetensors").name
+        == "z-image"
+    )
     with pytest.raises(ValueError, match = "unsloth"):
-        backend.validate_load_request("some-org/Z-Image", gguf_filename = "model.safetensors")
+        backend.validate_load_request(
+            "some-org/Z-Image", gguf_filename = "model.ckpt", model_kind = "single_file"
+        )
     with pytest.raises(ValueError, match = "family"):
         backend.validate_load_request("meta/Llama-3", gguf_filename = "q.gguf")
     # A family-looking repo with a non-GGUF single-file name is rejected before the route evicts chat.
@@ -11711,7 +11796,7 @@ def _upscale_with_tiling_vae(backend, monkeypatch, **kw):
 
     vae = _TilingVae()
     monkeypatch.setattr(_FakeImg2ImgPipe, "vae", vae, raising = False)
-    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None: False)
+    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None, pipe = None: False)
     seen = {}
     real_call = _FakeImg2ImgPipe.__call__
 
@@ -11747,7 +11832,7 @@ def test_generate_upscale_that_fits_is_not_tiled(fake_runtime, tmp_path, monkeyp
 
     vae = _TilingVae()
     monkeypatch.setattr(_FakeImg2ImgPipe, "vae", vae, raising = False)
-    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None: False)
+    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None, pipe = None: False)
     backend.generate(prompt = "a sloth", steps = 4, seed = 1, init_image = _png_b64(512), upscale = 2.0)
     assert vae.calls == []
 
@@ -11760,7 +11845,7 @@ def test_generate_upscale_restores_the_vae_when_the_render_fails(
 
     vae = _TilingVae()
     monkeypatch.setattr(_FakeImg2ImgPipe, "vae", vae, raising = False)
-    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None: False)
+    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None, pipe = None: False)
 
     def _boom(self, **kwargs):
         raise RuntimeError("decode failed")
@@ -11776,7 +11861,7 @@ def test_generate_upscale_on_math_only_attention_still_refuses(fake_runtime, tmp
 
     backend = _loaded_backend_on_a_16g_card(tmp_path, monkeypatch)
     monkeypatch.setattr(_FakeImg2ImgPipe, "vae", _TilingVae(), raising = False)
-    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None: True)
+    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None, pipe = None: True)
     with pytest.raises(ValueError) as excinfo:
         backend.generate(prompt = "a sloth", steps = 4, seed = 1, init_image = _png_b64(1024), upscale = 2.0)
     message = str(excinfo.value)
@@ -11803,7 +11888,7 @@ def test_generate_windows_batch_prices_tiles_at_the_batch_without_slicing(
     backend = _loaded_backend_on_a_16g_card(tmp_path, monkeypatch)
     vae = vae_cls()
     monkeypatch.setattr(_FakeImg2ImgPipe, "vae", vae, raising = False)
-    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None: False)
+    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None, pipe = None: False)
     monkeypatch.setattr(dmod.sys, "platform", "win32")
     kw = dict(prompt = "a sloth", steps = 4, init_image = _png_b64(1024), upscale = 2.0, seeds = [1, 2])
     if vae_cls is _TilingVae:
@@ -11830,7 +11915,7 @@ def test_generate_upscale_refuses_when_the_vae_tiling_does_not_engage(
     backend = _loaded_backend_on_a_16g_card(tmp_path, monkeypatch)
     vae = _BrokenTilingVae()
     monkeypatch.setattr(_FakeImg2ImgPipe, "vae", vae, raising = False)
-    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None: False)
+    monkeypatch.setattr(dmod, "_quadratic_attention", lambda target, backend = None, pipe = None: False)
     calls = []
     real_call = _FakeImg2ImgPipe.__call__
 
@@ -14985,3 +15070,92 @@ def test_qwen_load_samples_at_comfy_static_shift(fake_runtime, tmp_path, monkeyp
     backend = _loaded_backend(tmp_path, family_override = "qwen-image")
     cfg = backend._state.pipe.scheduler.config
     assert (cfg["shift"], cfg["use_dynamic_shifting"], cfg["shift_terminal"]) == (3.1, False, None)
+
+
+def _write_min_safetensors(path):
+    """A real, minimal safetensors container (one F32 scalar) written by hand: ``torch`` is faked here."""
+    header = json.dumps({"w": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+    path.write_bytes(len(header).to_bytes(8, "little") + header + b"\x00\x00\x80\x3f")
+    return path
+
+
+def _hub_single_file_load(monkeypatch, tmp_path, file_bytes_writer, *, card_tag):
+    """``load_pipeline`` on an UNTRUSTED Hub repo + .safetensors name, with the download stubbed to a local file and
+    the repo's base_model card tag pointing back at the untrusted repo itself."""
+    checkpoint = tmp_path / "dit.safetensors"
+    file_bytes_writer(checkpoint)
+    downloads = []
+
+    def _fake_download(
+        self,
+        repo_id,
+        filename,
+        hf_token,
+        local_files_only = False,
+    ):
+        downloads.append((repo_id, filename))
+        return str(checkpoint)
+
+    monkeypatch.setattr(DiffusionBackend, "_resolve_gguf_path", _fake_download)
+    monkeypatch.setattr("core.inference.diffusion._hf_base_model", lambda repo_id, token: card_tag)
+    backend = DiffusionBackend()
+    status = backend.load_pipeline(
+        "evil-org/z-image-comfy",
+        gguf_filename = "split_files/diffusion_models/dit.safetensors",
+        model_kind = "single_file",
+        family_override = "z-image",
+    )
+    return status, downloads
+
+
+def test_untrusted_hub_safetensors_single_file_takes_config_only_from_the_family_base(
+    fake_runtime, tmp_path, monkeypatch
+):
+    """The per-file trust path: the one named file is fetched from the untrusted repo, but config, companions and the
+    pipeline assembly all come from the family's trusted base, even when the repo's card tag names itself."""
+    status, downloads = _hub_single_file_load(
+        monkeypatch, tmp_path, _write_min_safetensors, card_tag = "evil-org/z-image-comfy"
+    )
+    assert status["loaded"] is True
+    assert downloads == [("evil-org/z-image-comfy", "split_files/diffusion_models/dit.safetensors")]
+    assert _FakeTransformer.last["path"] == str(tmp_path / "dit.safetensors")
+    for value in (_FakeTransformer.last["config"], _FakePipeline.last["base"], status["base_repo"]):
+        assert "evil-org" not in str(value).lower()
+    # The family base, or its byte-identical unsloth mirror (the fetch-site swap).
+    assert _FakeTransformer.last["config"] in ("Tongyi-MAI/Z-Image-Turbo", "unsloth/Z-Image-Turbo")
+    assert status["base_repo"] == "Tongyi-MAI/Z-Image-Turbo"
+    assert "trust_remote_code" not in _FakeTransformer.last
+    assert "trust_remote_code" not in _FakePipeline.last
+    assert "original_config" not in _FakeTransformer.last
+
+
+def test_untrusted_hub_single_file_with_a_malformed_header_is_refused_before_any_loader(
+    fake_runtime, tmp_path, monkeypatch
+):
+    """A .safetensors NAME over pickle bytes never reaches from_single_file or the comfy scan."""
+    pickle_bytes = (
+        b"\x80\x04\x95" + b"\x00" * 64
+    )  # a pickle protocol-4 prefix, not a safetensors header
+
+    with pytest.raises(ValueError, match = "not a valid safetensors checkpoint"):
+        _hub_single_file_load(
+            monkeypatch, tmp_path, lambda p: p.write_bytes(pickle_bytes), card_tag = None
+        )
+    assert _FakeTransformer.last == {}
+    assert _FakePipeline.last == {}
+
+
+def test_untrusted_hub_single_file_header_is_checked_before_the_flux2_gguf_probe(
+    fake_runtime, tmp_path, monkeypatch
+):
+    """The FLUX.2 probe parses the file as GGUF, so an untrusted file must clear the safetensors check first."""
+    probed = []
+    monkeypatch.setattr(
+        "core.inference.diffusion.assert_flux2_gguf_matches_base",
+        lambda fam, base, path: probed.append(path),
+    )
+    with pytest.raises(ValueError, match = "not a valid safetensors checkpoint"):
+        _hub_single_file_load(
+            monkeypatch, tmp_path, lambda p: p.write_bytes(b"GGUF" + b"\x00" * 64), card_tag = None
+        )
+    assert probed == []

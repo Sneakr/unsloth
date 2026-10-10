@@ -8,14 +8,26 @@
 // other paths to avoid duplicates: skips the message when a render_html tool
 // already rendered it, and skips full documents the in-place collapse handles.
 
-import { ArtifactCard, useChatRuntimeStore } from "@/features/chat";
-import { derivedForParts, PART_SEPARATOR } from "./message-derived";
 import {
-  extractHtmlFences,
-  isRenderableRenderHtmlToolPart,
-} from "@/features/chat/artifacts/html-fences";
+  memoOnArray,
+  partsHaveRenderableRenderHtmlTool,
+} from "@/components/assistant-ui/message-derived";
+import { ArtifactCard, useChatRuntimeStore } from "@/features/chat";
+import { extractHtmlFences } from "@/features/chat/artifacts/html-fences";
 import { useAuiState } from "@assistant-ui/react";
 import { type FC, useMemo } from "react";
+
+// A char that cannot occur in chat text, used to keep text parts separate so a
+// fence is never stitched across a non-text part (tool call, source, reasoning).
+const PART_SEPARATOR = "\u0000";
+
+const visibleTextBlob = memoOnArray(
+  (content: ReadonlyArray<{ type: string; text?: unknown }>) =>
+    content
+      .filter((part) => part.type === "text" && "text" in part)
+      .map((part) => (part as { text: string }).text)
+      .join(PART_SEPARATOR),
+);
 
 export const MessageHtmlArtifacts: FC = () => {
   // Skip while streaming; "!== running" also covers loaded historical messages.
@@ -23,12 +35,12 @@ export const MessageHtmlArtifacts: FC = () => {
     ({ message }) => message.status?.type === "running",
   );
   const hasRenderHtmlTool = useAuiState(({ message }) =>
-    message.parts.some(isRenderableRenderHtmlToolPart),
+    partsHaveRenderableRenderHtmlTool(message.parts),
   );
   // Visible assistant text parts only (no reasoning, tools, sources, or errors),
   // kept separate so a fence stays within the part the user actually sees.
-  const textBlob = useAuiState(
-    ({ message }) => derivedForParts(message.content).textBlob,
+  const textBlob = useAuiState(({ message }) =>
+    visibleTextBlob(message.content),
   );
   const collapseHtmlArtifacts = useChatRuntimeStore(
     (state) => state.collapseHtmlArtifacts,
