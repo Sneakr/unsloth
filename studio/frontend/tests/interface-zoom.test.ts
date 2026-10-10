@@ -211,8 +211,11 @@ test("the popup keeps one on-screen size and does not dismiss a modal", () => {
   );
   assert.match(zoom, /if \(!isTauri \|\| mac\) return;\s*event\.preventDefault\(\);/);
   assert.match(zoom, /window\.addEventListener\("wheel", onWheel, \{ passive: false \}\)/);
-  assert.match(zoom, /if \(mac \|\| isTauri\) \{\s*armWheel\(\);\s*\} else \{/, "desktop wheels must be cancellable even when Ctrl was pressed in another window; macOS scopes also receive pinch without keydown");
-  assert.doesNotMatch(zoom, /passive: true/, "a passive fallback cannot cancel the first Ctrl+wheel after a missed keydown");
+  assert.match(zoom, /if \(mac\) \{\s*armWheel\(\);\s*\} else \{/, "only macOS keeps the blocking listener armed, since a pinch reaches its zoom scopes without a keydown; anywhere else a blocking window wheel listener puts every scroll on the main thread, which dropped 40% of desktop frames in a long maths chat");
+  assert.match(zoom, /const onPassiveWheel = \(event: WheelEvent\) => \{\s*if \(wheelArmed \|\| !isZoomWheel\(event\)\) return;\s*modifierHeld = true;\s*syncWheel\(\);\s*\};/, "a Ctrl+wheel whose keydown went to another window arms the blocking listener, so only that first notch scrolls instead of zooming");
+  assert.match(zoom, /window\.addEventListener\("wheel", onPassiveWheel, \{ passive: true \}\);/);
+  assert.match(zoom, /window\.removeEventListener\("wheel", onPassiveWheel\);/);
+  assert.match(zoom, /if \(modifierHeld && !event\.ctrlKey && !event\.metaKey\) \{\s*modifierHeld = false;\s*syncWheel\(\);\s*\}/, "a plain wheel disarms a listener that a missed keyup left armed, so scrolling does not stay on the main thread");
   assert.match(zoom, /if \(wheelArmed\) return;\s*wheelArmed = true;\s*window\.addEventListener\("wheel", onWheel, \{ passive: false \}\);/, "arming is idempotent, so a Ctrl+wheel zooms once");
   assert.match(zoom, /modifierHeld = event\.ctrlKey \|\| event\.metaKey;\s*pointerInScope = zoomScopeFor/, "a modifier pressed while another window had focus arms the listener as soon as the pointer moves");
   assert.match(zoom, /const syncWheel = \(\) => \{\s*if \(modifierHeld \|\| pointerInScope\) armWheel\(\);\s*else disarmWheel\(\);\s*\};/, "in the browser the blocking listener is armed while Ctrl/Meta is held or the pointer is over a zoom scope, so a pinch, which arrives as Ctrl+wheel with no keydown, still reaches the scope");

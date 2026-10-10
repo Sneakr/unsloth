@@ -200,6 +200,10 @@ export function InterfaceZoom() {
     const wheelStep = createWheelZoomAccumulator();
     const scopeWheelStep = createWheelZoomAccumulator();
     const onWheel = (event: WheelEvent) => {
+      if (modifierHeld && !event.ctrlKey && !event.metaKey) {
+        modifierHeld = false;
+        syncWheel();
+      }
       if (event.defaultPrevented || !isZoomWheel(event)) return;
       const scope = zoomScopeFor(event.target);
       if (scope) {
@@ -243,13 +247,19 @@ export function InterfaceZoom() {
       modifierHeld = false;
       syncWheel();
     };
-    if (mac || isTauri) {
+    const onPassiveWheel = (event: WheelEvent) => {
+      if (wheelArmed || !isZoomWheel(event)) return;
+      modifierHeld = true;
+      syncWheel();
+    };
+    if (mac) {
       armWheel();
     } else {
       window.addEventListener("keydown", onModifierChange, true);
       window.addEventListener("keyup", onModifierChange, true);
       window.addEventListener("pointerover", onPointerOver, true);
       window.addEventListener("blur", onBlur);
+      window.addEventListener("wheel", onPassiveWheel, { passive: true });
     }
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
@@ -257,6 +267,7 @@ export function InterfaceZoom() {
       window.removeEventListener("keyup", onModifierChange, true);
       window.removeEventListener("pointerover", onPointerOver, true);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("wheel", onPassiveWheel);
       window.removeEventListener("wheel", onWheel);
     };
   }, []);
