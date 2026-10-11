@@ -206,6 +206,49 @@ test("the boot script mirrors each query onto <html> and follows its changes", (
   assert.equal(attributes.get(LG), true);
 });
 
+test("boot script data cannot close an inline script and retains its exact runtime values", () => {
+  const values = [
+    "(width<=1023px)",
+    "(width>=40rem)",
+    '</script><script>globalThis.injected=true</script>',
+    '</ScRiPt><script>globalThis.injected=true</script>',
+    '<!--<script>',
+    '"];globalThis.injected=true;//',
+    '\\";globalThis.injected=true;//',
+    '` ${globalThis.injected=true}',
+    "quotes: \" ' \\; literal escapes: \\u003c \\u2028",
+    String.fromCharCode(...Array.from({ length: 32 }, (_, i) => i)),
+    "line\u2028paragraph\u2029end",
+    "surrogates: \ud800 \udfff; emoji: \ud83d\ude00",
+  ];
+  // Exercise both serialized fields; the DOM stubs record their unmodified values.
+  const queries = values.map((value) => ({ attribute: value, query: value }));
+  const script = viewportBootScript(queries);
+  assert.doesNotMatch(script, /[<>\u2028\u2029]/u);
+
+  const observedQueries: string[] = [];
+  const attributes: [string, boolean][] = [];
+  const context = {
+    injected: false,
+    document: {
+      documentElement: {
+        toggleAttribute: (name: string, force: boolean) => attributes.push([name, force]),
+      },
+    },
+    window: {
+      addEventListener: () => {},
+      matchMedia: (query: string) => {
+        observedQueries.push(query);
+        return { matches: true, addEventListener: () => {} };
+      },
+    },
+  };
+  vm.runInNewContext(script, context, { timeout: 1000 });
+  assert.equal(context.injected, false);
+  assert.deepEqual(observedQueries, values);
+  assert.deepEqual(attributes, values.map((value) => [value, true]));
+});
+
 test("resize refreshes gates before app listeners even while existing media lists are stale", () => {
   const attributes = new Map<string, boolean>();
   const listeners: (() => void)[] = [];

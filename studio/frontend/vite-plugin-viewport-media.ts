@@ -150,7 +150,13 @@ export function gateViewportMedia(css: string): { css: string; queries: Viewport
 }
 
 export function viewportBootScript(queries: readonly ViewportQuery[]): string {
-  const entries = JSON.stringify(queries.map(({ attribute, query }) => [attribute, query]));
+  // Also keep the data safe if this external script is ever inlined into HTML.
+  // JSON.stringify already escapes quotes, backslashes and control characters.
+  const entries = JSON.stringify(queries.map(({ attribute, query }) => [attribute, query]))
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
   return `(function(){var root=document.documentElement;var entries=${entries};entries.forEach(function(entry){var list=window.matchMedia(entry[1]);var apply=function(){root.toggleAttribute(entry[0],list.matches)};apply();list.addEventListener("change",apply)});window.addEventListener("resize",function(){entries.forEach(function(entry){root.toggleAttribute(entry[0],window.matchMedia(entry[1]).matches)})})})();\n`;
 }
 
